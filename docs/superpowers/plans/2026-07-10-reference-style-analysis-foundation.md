@@ -1,5 +1,7 @@
 # Reference Style Analysis Foundation Implementation Plan
 
+> **Status:** Superseded before implementation. The editable-PPT pipeline is already proven; the replacement plan focuses on Style1 content adaptation: `docs/superpowers/plans/2026-07-10-style1-content-adaptation-first.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a tested reference-PPT analysis pipeline that decomposes the Style1 and Style2 folders into slide catalogs, quality grades, content-pattern summaries, visual-system summaries, component signatures, rendered contact sheets, and reviewable reports.

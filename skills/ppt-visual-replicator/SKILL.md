@@ -1,6 +1,6 @@
 ---
 name: ppt-visual-replicator
-description: Redraw a target-content PowerPoint in the visual style of one or more reference-style PowerPoint decks, generate page images through image-to-image editing, and reconstruct them into an object-level editable PPTX. Use when the user asks to 复刻参考PPT风格, apply a reference deck's visual style, redesign slides through image generation, or convert the resulting visual pages back into editable PowerPoint without rewriting the content.
+description: Use when a target-content PowerPoint must adopt a reference deck's visual style through image generation and return to an object-level editable PPTX without rewriting the content, including 复刻参考PPT风格, reference-style redesign, and image-to-editable-PowerPoint requests.
 ---
 
 # PPT Visual Replicator
@@ -49,13 +49,15 @@ For a representative-page trial, add a selection such as `--slides "1,5,10,47"`.
 
 ### 3. Match target pages to reference pages
 
-Build the generic page-family plan:
+Build the page-family plan:
 
 ```bash
 python3 scripts/build_visual_plan.py --run-dir "path/to/run"
 ```
 
-Use one primary reference slide per target slide unless the user explicitly requests multiple references. Review `visual-plan.json` before paid image generation.
+Treat the first supplied reference as the primary reference deck. Reuse one canonical reference anchor for every target page in the same family. Do not select later reference decks automatically; enable fallback decks or add page overrides only when the user explicitly accepts the exception.
+
+Review `visual-plan.json` before paid image generation. Stop if `style_lock` is missing, automatic pages mix reference decks, or one page family uses multiple automatic anchors.
 
 ### 4. Create and run image-edit jobs
 
@@ -65,13 +67,31 @@ Create prompts and provenance records without network calls:
 python3 scripts/build_image_jobs.py --run-dir "path/to/run"
 ```
 
-After reviewing the commands, execute serially:
+Generate only the first calibration page for each active page family:
 
 ```bash
-python3 scripts/build_image_jobs.py --run-dir "path/to/run" --execute
+python3 scripts/build_image_jobs.py \
+  --run-dir "path/to/run" \
+  --execute-phase calibration
 ```
 
-Every job must call `editppt image edit` with the target slide first and the selected reference slide second. Retry only failed pages.
+Review every calibration page at full size. Approve only when its title placement, margins, footer, palette, decorative language, density, and recurring chrome can govern the rest of that family. Record the approval and immutable hashes:
+
+```bash
+python3 scripts/build_image_jobs.py \
+  --run-dir "path/to/run" \
+  --approve-calibration
+```
+
+This writes `calibration-approved.json`. Then generate the remaining pages:
+
+```bash
+python3 scripts/build_image_jobs.py \
+  --run-dir "path/to/run" \
+  --execute-phase scale
+```
+
+Calibration jobs must call `editppt image edit` with the target slide first and the locked family reference anchor second. Scale jobs must pass those two images followed by the approved generated calibration page for that family. Retry only failed pages.
 
 ### 5. Validate generated pages
 
@@ -81,7 +101,7 @@ Run:
 python3 scripts/validate_visual_run.py --run-dir "path/to/run" --stage generated
 ```
 
-Do not reconstruct while generated pages or provenance records are incomplete.
+Do not reconstruct while generated pages or provenance records are incomplete. Validation must reject mixed automatic reference decks, multiple automatic anchors in one family, unapproved scale jobs, and calibration images changed after approval.
 
 ### 6. Reconstruct editable slides
 
@@ -119,6 +139,8 @@ Render and inspect every final slide at full size. Deliver only when `validation
 
 - Target or reference inputs are missing, invalid, or temporary lock files.
 - A target page has no credible reference-family match.
+- `visual-plan.json` has no primary deck lock, contains mixed automatic reference decks, or assigns multiple automatic anchors to one page family.
+- Scale jobs exist without `calibration-approved.json`, or an approved calibration hash no longer matches the generated calibration page.
 - Generated pages change chart meaning, omit registered content, or contain unresolved text drift.
 - Any page lacks its target, reference, prompt, output, or hash provenance.
 - Reconstruction validation fails or produces an image-only deck.

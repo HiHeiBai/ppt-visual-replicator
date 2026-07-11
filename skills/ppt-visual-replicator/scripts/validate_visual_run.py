@@ -30,8 +30,131 @@ def _normalize(text: str) -> str:
     return "".join(text.split()).lower()
 
 
-def _generated_checks(root: Path, errors: list[str], warnings: list[str]) -> dict[str, int]:
-    evidence = {"planned_pages": 0, "generated_pages": 0, "provenance_files_checked": 0}
+def _style_consistency_checks(
+    root: Path,
+    plan: dict[str, Any],
+    jobs_manifest: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "style_lock_present": False,
+        "automatic_reference_deck_count": 0,
+        "automatic_family_anchor_counts": {},
+        "explicit_override_pages": [],
+        "allowed_fallback_families": [],
+        "scale_jobs": 0,
+        "approved_calibration_families": 0,
+        "approved_calibration_hashes_checked": 0,
+    }
+    style_lock = plan.get("style_lock")
+    if not isinstance(style_lock, dict):
+        errors.append("visual plan has no deck-level style lock")
+        style_lock = {}
+    else:
+        evidence["style_lock_present"] = True
+    primary_index = int(style_lock.get("primary_reference_index", 0))
+    allow_fallback = style_lock.get("allow_fallback_decks") is True
+    if style_lock.get("anchor_policy") != "one_per_family":
+        errors.append("visual plan does not enforce one automatic anchor per family")
+
+    automatic_decks: set[int] = set()
+    anchors_by_family: dict[str, set[tuple[int, int]]] = {}
+    override_pages: list[int] = []
+    fallback_families: set[str] = set()
+    for page in plan.get("pages", []):
+        mode = str(page.get("match_mode", ""))
+        slide = int(page.get("target_slide", 0))
+        if mode == "override":
+            override_pages.append(slide)
+            continue
+        family = str(page.get("target_family", "content"))
+        reference_index = int(page.get("reference_index", 0))
+        reference_slide = int(page.get("reference_slide", 0))
+        automatic_decks.add(reference_index)
+        anchors_by_family.setdefault(family, set()).add((reference_index, reference_slide))
+        if mode == "fallback_deck":
+            fallback_families.add(family)
+
+    evidence["automatic_reference_deck_count"] = len(automatic_decks)
+    evidence["automatic_family_anchor_counts"] = {
+        family: len(anchors) for family, anchors in sorted(anchors_by_family.items())
+    }
+    evidence["explicit_override_pages"] = sorted(override_pages)
+    evidence["allowed_fallback_families"] = sorted(fallback_families) if allow_fallback else []
+    non_primary_decks = sorted(index for index in automatic_decks if index != primary_index)
+    if non_primary_decks and not allow_fallback:
+        if len(automatic_decks) > 1:
+            errors.append(
+                "multiple automatic reference decks violate the primary deck lock: "
+                + ", ".join(str(index) for index in sorted(automatic_decks))
+            )
+        else:
+            errors.append(f"automatic pages use non-primary reference deck: {non_primary_decks[0]}")
+    elif non_primary_decks:
+        warnings.append(
+            "allowed fallback decks are used for page families: "
+            + ", ".join(sorted(fallback_families))
+        )
+    if override_pages:
+        warnings.append(
+            "explicit reference overrides are excluded from automatic style-lock checks: "
+            + ", ".join(str(slide) for slide in sorted(override_pages))
+        )
+    for family, anchors in sorted(anchors_by_family.items()):
+        if len(anchors) > 1:
+            errors.append(f"page family uses multiple automatic anchors: {family}")
+
+    scale_jobs = [job for job in jobs_manifest.get("jobs", []) if job.get("batch") == "scale"]
+    evidence["scale_jobs"] = len(scale_jobs)
+    if not scale_jobs:
+        return evidence
+    approval_path = root / "calibration-approved.json"
+    if not approval_path.is_file():
+        errors.append("calibration approval is required when scale jobs exist")
+        return evidence
+    try:
+        approval = json.loads(approval_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"calibration approval is invalid: {exc}")
+        return evidence
+    approved_families = approval.get("families", {})
+    if not isinstance(approved_families, dict):
+        errors.append("calibration approval has no family records")
+        return evidence
+    evidence["approved_calibration_families"] = len(approved_families)
+    for family, item in sorted(approved_families.items()):
+        if not isinstance(item, dict):
+            errors.append(f"calibration approval is invalid for family: {family}")
+            continue
+        output_value = item.get("output")
+        expected_hash = item.get("sha256")
+        output = root / str(output_value) if output_value else None
+        if output is None or not output.is_file() or not expected_hash:
+            errors.append(f"approved calibration output is incomplete for family: {family}")
+            continue
+        evidence["approved_calibration_hashes_checked"] += 1
+        if _sha256(output) != expected_hash:
+            errors.append(f"approved calibration hash changed for family: {family}")
+    for job in scale_jobs:
+        family = str(job.get("target_family", "content"))
+        approved = approved_families.get(family)
+        if not isinstance(approved, dict):
+            errors.append(f"calibration approval is missing for scale family: {family}")
+            continue
+        if job.get("calibration_anchor") != approved.get("output"):
+            errors.append(f"scale job uses an unapproved calibration anchor: {job.get('job_id')}")
+        if job.get("calibration_anchor_sha256") != approved.get("sha256"):
+            errors.append(f"scale job calibration hash does not match approval: {job.get('job_id')}")
+    return evidence
+
+
+def _generated_checks(root: Path, errors: list[str], warnings: list[str]) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "planned_pages": 0,
+        "generated_pages": 0,
+        "provenance_files_checked": 0,
+    }
     try:
         plan = json.loads((root / "visual-plan.json").read_text(encoding="utf-8"))
         jobs_manifest = json.loads((root / "image-jobs.json").read_text(encoding="utf-8"))
@@ -39,6 +162,7 @@ def _generated_checks(root: Path, errors: list[str], warnings: list[str]) -> dic
         errors.append(f"missing run manifest: {exc.filename}")
         return evidence
     evidence["planned_pages"] = int(plan.get("page_count", len(plan.get("pages", []))))
+    evidence.update(_style_consistency_checks(root, plan, jobs_manifest, errors, warnings))
     jobs = {int(job.get("target_slide", 0)): job for job in jobs_manifest.get("jobs", [])}
     for page in plan.get("pages", []):
         slide = int(page["target_slide"])

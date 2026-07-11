@@ -17,11 +17,11 @@
 - Modify: `skills/ppt-visual-replicator/references/page-matching.md`
 - Test: `tests/test_visual_plan.py`
 
-- [ ] Add a failing test with three reference decks and verify default mappings use reference index 0 only.
-- [ ] Add a failing test with multiple content candidates and verify all target content pages reuse one canonical anchor.
-- [ ] Add a failing test proving fallback decks require `allow_fallback_decks=True`.
-- [ ] Implement primary-deck locking, deterministic family medoids, explicit fallback warnings, and style-lock metadata.
-- [ ] Run focused and full tests, then commit.
+- [x] Add a failing test with three reference decks and verify default mappings use reference index 0 only.
+- [x] Add a failing test with multiple content candidates and verify all target content pages reuse one canonical anchor.
+- [x] Add a failing test proving fallback decks require `allow_fallback_decks=True`.
+- [x] Implement primary-deck locking, deterministic family medoids, explicit fallback warnings, and style-lock metadata.
+- [x] Run focused and full tests, then commit.
 
 ### Task 2: Add calibration-first image generation
 
@@ -30,11 +30,11 @@
 - Modify: `skills/ppt-visual-replicator/references/image-prompt-contract.md`
 - Test: `tests/test_image_jobs.py`
 
-- [ ] Add a failing test that marks the first target page in every family as `calibration` and remaining pages as `scale`.
-- [ ] Add a failing test that calibration execution writes output hashes while scale execution is refused before approval.
-- [ ] Add a failing test that scale commands pass target, family reference, then approved generated calibration image.
-- [ ] Implement phase execution and `calibration-approved.json` hash recording.
-- [ ] Run focused and full tests, then commit.
+- [x] Add a failing test that marks the first target page in every family as `calibration` and remaining pages as `scale`.
+- [x] Add a failing test that calibration execution writes output hashes while scale execution is refused before approval.
+- [x] Add a failing test that scale commands pass target, family reference, then approved generated calibration image.
+- [x] Implement phase execution and `calibration-approved.json` hash recording.
+- [x] Run focused and full tests, then commit.
 
 ### Task 3: Reject deck-level inconsistency before reconstruction
 
@@ -43,9 +43,9 @@
 - Modify: `skills/ppt-visual-replicator/references/acceptance.md`
 - Test: `tests/test_validate_visual_run.py`
 
-- [ ] Add failing tests for multiple automatic decks, multiple automatic anchors per family, missing calibration approval, and changed calibration hashes.
-- [ ] Implement consistency evidence and errors in generated-stage validation.
-- [ ] Run focused and full tests, then commit.
+- [x] Add failing tests for multiple automatic decks, multiple automatic anchors per family, missing calibration approval, and changed calibration hashes.
+- [x] Implement consistency evidence and errors in generated-stage validation.
+- [x] Run focused and full tests, then commit.
 
 ### Task 4: Update the Skill workflow and verify the real 47-page plan
 
@@ -53,9 +53,8 @@
 - Modify: `skills/ppt-visual-replicator/SKILL.md`
 - Modify: `tests/test_skill_package.py`
 
-- [ ] Add failing package assertions for primary deck lock, calibration execution, approval, scale execution, and consistency validation.
-- [ ] Update the workflow commands and stop conditions without duplicating reference details.
-- [ ] Verify the real 47-page target uses one primary deck and at most one automatic anchor per family.
-- [ ] Run all tests, `quick_validate.py`, placeholder scans, `editppt doctor`, and Git diff checks.
-- [ ] Commit the completed optimization.
-
+- [x] Add failing package assertions for primary deck lock, calibration execution, approval, scale execution, and consistency validation.
+- [x] Update the workflow commands and stop conditions without duplicating reference details.
+- [x] Verify the real 47-page target uses one primary deck and at most one automatic anchor per family.
+- [x] Run all tests, `quick_validate.py`, placeholder scans, `editppt doctor`, and Git diff checks.
+- [x] Commit the completed optimization.

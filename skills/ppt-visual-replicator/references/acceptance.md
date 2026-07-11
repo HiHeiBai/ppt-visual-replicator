@@ -2,6 +2,10 @@
 
 ## Generated stage
 
+- All automatic pages use one automatic reference deck unless fallback decks were explicitly enabled and recorded as warnings.
+- Use one automatic reference anchor per page family; record explicit page overrides separately as warnings.
+- Every scale family has an entry in `calibration-approved.json`.
+- Every approved calibration hash still matches the calibration image, and every scale job records that approved hash.
 - One generated image exists for every planned target page.
 - Every image has the expected aspect ratio and non-zero dimensions.
 - Every job records target, reference, prompt, and output provenance.
@@ -19,4 +23,3 @@
 ## Delivery
 
 Return the final PPTX path, run directory, and validation path. Report warnings plainly; do not describe a warning as a pass.
-

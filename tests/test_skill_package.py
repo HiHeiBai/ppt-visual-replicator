@@ -27,6 +27,25 @@ class SkillPackageTest(unittest.TestCase):
             self.assertIn(reference, text)
             self.assertTrue((SKILL / reference).is_file(), reference)
 
+    def test_skill_requires_primary_deck_lock_and_calibration_gate(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("primary reference deck", text)
+        self.assertIn("--execute-phase calibration", text)
+        self.assertIn("--approve-calibration", text)
+        self.assertIn("--execute-phase scale", text)
+        self.assertIn("calibration-approved.json", text)
+        self.assertIn("--stage generated", text)
+        self.assertIn("mixed automatic reference decks", text)
+
+    def test_acceptance_requires_deck_and_calibration_consistency(self) -> None:
+        text = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")
+
+        self.assertIn("one automatic reference deck", text)
+        self.assertIn("one automatic reference anchor per page family", text)
+        self.assertIn("calibration-approved.json", text)
+        self.assertIn("approved calibration hash", text)
+
     def test_openai_metadata_matches_skill(self) -> None:
         text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
 

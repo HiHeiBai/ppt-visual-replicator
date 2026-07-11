@@ -9,10 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "ppt-visual-replicator" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from build_image_jobs import JobError, build_image_jobs  # noqa: E402
+from build_image_jobs import (  # noqa: E402
+    JobError,
+    approve_calibration,
+    build_image_jobs,
+    execute_image_jobs,
+)
 
 
-def write_run(root: Path, page_count: int = 2) -> Path:
+def write_run(root: Path, page_count: int = 2, families=None) -> Path:
+    families = families or ["content"] * page_count
     for directory in ("targets", "references/reference-01", "prompts", "generated"):
         (root / directory).mkdir(parents=True, exist_ok=True)
     pages = []
@@ -24,7 +30,7 @@ def write_run(root: Path, page_count: int = 2) -> Path:
         pages.append(
             {
                 "target_slide": number,
-                "target_family": "content",
+                "target_family": families[number - 1],
                 "target_image": str(target.relative_to(root)),
                 "reference_index": 0,
                 "reference_deck": "/tmp/reference.pptx",
@@ -50,7 +56,11 @@ class ImageJobsTest(unittest.TestCase):
 
             self.assertEqual(len(manifest["jobs"]), 2)
             first = manifest["jobs"][0]
+            second = manifest["jobs"][1]
             self.assertEqual(first["status"], "ready")
+            self.assertEqual(first["batch"], "calibration")
+            self.assertEqual(second["batch"], "scale")
+            self.assertEqual(second["calibration_anchor"], first["output"])
             self.assertEqual(len(first["target_sha256"]), 64)
             self.assertEqual(len(first["reference_sha256"]), 64)
             self.assertEqual(len(first["prompt_sha256"]), 64)
@@ -80,9 +90,23 @@ class ImageJobsTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            manifest = build_image_jobs(
+            build_image_jobs(run_dir)
+            execute_image_jobs(
                 run_dir,
-                execute=True,
+                phase="calibration",
+                command_prefix=[sys.executable, str(fake)],
+            )
+            with self.assertRaisesRegex(JobError, "calibration approval"):
+                execute_image_jobs(
+                    run_dir,
+                    phase="scale",
+                    command_prefix=[sys.executable, str(fake)],
+                )
+            approval = approve_calibration(run_dir)
+            self.assertEqual(set(approval["families"]), {"content"})
+            manifest = execute_image_jobs(
+                run_dir,
+                phase="scale",
                 command_prefix=[sys.executable, str(fake)],
             )
 
@@ -96,6 +120,31 @@ class ImageJobsTest(unittest.TestCase):
             )
             self.assertTrue(all(job["status"] == "complete" for job in manifest["jobs"]))
             self.assertTrue(all(job["output_sha256"] for job in manifest["jobs"]))
+            scale = next(job for job in manifest["jobs"] if job["batch"] == "scale")
+            images = [scale["command"][i + 1] for i, value in enumerate(scale["command"]) if value == "--image"]
+            self.assertEqual(len(images), 3)
+            self.assertEqual(images[2], str(run_dir.resolve() / "generated/page-001.png"))
+
+    def test_first_page_of_each_family_is_a_calibration_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = write_run(
+                Path(temp_dir) / "run",
+                page_count=4,
+                families=["cover", "content", "content", "table"],
+            )
+
+            manifest = build_image_jobs(run_dir)
+
+            batches = [(job["target_slide"], job["target_family"], job["batch"]) for job in manifest["jobs"]]
+            self.assertEqual(
+                batches,
+                [
+                    (1, "cover", "calibration"),
+                    (2, "content", "calibration"),
+                    (3, "content", "scale"),
+                    (4, "table", "calibration"),
+                ],
+            )
 
     def test_refuses_to_overwrite_generated_pages_without_force(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

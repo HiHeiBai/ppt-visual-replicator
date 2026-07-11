@@ -194,6 +194,73 @@ def validate_visual_run(
     return result
 
 
+def validate_recorded_editppt_run(run_dir: str | Path) -> dict[str, Any]:
+    root = Path(run_dir).expanduser().resolve()
+    errors: list[str] = []
+    warnings: list[str] = []
+    evidence = {
+        "slides": 0,
+        "page_jobs": 0,
+        "page_validations_passed": 0,
+        "editable_text_shapes": 0,
+        "shape_count": 0,
+    }
+    try:
+        state = json.loads((root / "run_state.json").read_text(encoding="utf-8"))
+        page_jobs = json.loads((root / "page_jobs.json").read_text(encoding="utf-8"))
+        final_validation = json.loads((root / "final" / "validation.json").read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        errors.append(f"recorded editppt run is missing required state: {exc.filename}")
+        return {"passed": False, "errors": errors, "warnings": warnings, "evidence": evidence}
+
+    if state.get("status") != "complete":
+        errors.append(f"recorded editppt run is not complete: {state.get('status')}")
+    if final_validation.get("passed") is not True:
+        errors.append("recorded editppt final validation did not pass")
+    pages = page_jobs.get("pages", [])
+    evidence["page_jobs"] = len(pages)
+    for page in pages:
+        page_id = page.get("page_id", "unknown")
+        validation_path = root / "pages" / page_id / "validation.json"
+        manifest_path = root / "pages" / page_id / "manifest.json"
+        if not validation_path.is_file() or not manifest_path.is_file():
+            errors.append(f"recorded page artifacts are missing: {page_id}")
+            continue
+        page_validation = json.loads(validation_path.read_text(encoding="utf-8"))
+        if page_validation.get("passed") is not True:
+            errors.append(f"recorded page validation did not pass: {page_id}")
+            continue
+        evidence["page_validations_passed"] += 1
+        evidence["editable_text_shapes"] += int(page_validation.get("editable_text_shapes", 0))
+        evidence["shape_count"] += int(page_validation.get("shape_count", 0))
+
+    final_pptx_value = final_validation.get("pptx")
+    final_pptx = Path(final_pptx_value) if final_pptx_value else None
+    if final_pptx is None or not final_pptx.is_file():
+        errors.append(f"recorded final PPTX is missing: {final_pptx_value}")
+    else:
+        try:
+            final = inspect_pptx(final_pptx)
+            evidence["slides"] = int(final["slide_count"])
+        except InputError as exc:
+            errors.append(f"recorded final PPTX is invalid: {exc}")
+
+    expected = int(final_validation.get("expected_pages", len(pages)))
+    if evidence["slides"] and evidence["slides"] != expected:
+        errors.append(f"recorded final slide count mismatch: expected {expected}, found {evidence['slides']}")
+    if evidence["page_validations_passed"] != len(pages):
+        errors.append(
+            f"recorded page validation count mismatch: expected {len(pages)}, found {evidence['page_validations_passed']}"
+        )
+    return {
+        "schema": "ppt_visual_recorded_editppt_validation.v1",
+        "passed": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "evidence": evidence,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate generated pages and editable PPT reconstruction.")
     parser.add_argument("--run-dir", required=True)

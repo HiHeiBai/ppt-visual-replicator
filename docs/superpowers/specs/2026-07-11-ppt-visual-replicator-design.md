@@ -91,6 +91,16 @@ All paths stored in manifests are relative to the run directory when possible. O
 
 Use only generic page families and content signatures. Do not embed Style1, Style2, medical, or customer-specific rules in code.
 
+### Deck-level style lock
+
+- Treat the first supplied reference deck as the primary reference deck for the complete run.
+- Do not select pages from later reference decks unless the user explicitly enables fallback decks or provides an override.
+- Select one canonical reference anchor per page family from the primary deck. Reuse that anchor for every target page in the family.
+- When the primary deck has no ending page, reuse its cover anchor for ending pages and record the fallback.
+- Store the primary deck, family anchors, overrides, and fallback warnings in `visual-plan.json`.
+
+This lock prevents independent closest-page matching from switching among multiple reference decks and layouts as the run progresses.
+
 Default signature fields:
 
 - Page family.
@@ -114,6 +124,18 @@ Each page job must record:
 
 The prompt must instruct the image backend to preserve target content, chart meaning, composition responsibilities, and canvas ratio while transferring typography, palette, spacing, decorative language, and visual hierarchy from the reference.
 
+### Calibration gate
+
+Generate the first target page of every active page family as a calibration page. Do not generate remaining pages until all calibration outputs are reviewed and their hashes are recorded in `calibration-approved.json`.
+
+For every remaining page, pass three ordered visual inputs:
+
+1. The current target page.
+2. The locked family reference anchor.
+3. The approved generated calibration page for that family.
+
+The third input anchors the model to the actual generated deck language instead of asking every page to reinterpret the source reference independently.
+
 ## Reconstruction boundary
 
 Use the installed `image-to-editable-ppt` Skill and `editppt` CLI as an external dependency:
@@ -134,6 +156,7 @@ The MVP passes when:
 - Image jobs can be generated from a clean run without network calls.
 - The existing completed 13-page reconstruction run passes the new structural validator.
 - The final validator detects missing generated pages, missing critical numeric tokens, slide-count mismatch, and image-only PPT output.
+- The final validator rejects unapproved calibration pages, multiple automatic reference decks, or multiple automatic reference anchors inside one page family.
 
 ## Non-goals
 
@@ -143,4 +166,3 @@ The MVP passes when:
 - No fork of `image-to-editable-ppt`.
 - No inclusion of customer decks or multi-gigabyte historical outputs in the Skill package.
 - No full 47-page paid image regeneration during MVP implementation; existing 47-page and 13-page artifacts are regression evidence.
-

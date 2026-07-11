@@ -123,6 +123,25 @@ class VisualPlanTest(unittest.TestCase):
         with self.assertRaisesRegex(PlanError, "does not exist"):
             build_plan(source, references, overrides={"1": {"reference_index": 0, "slide": 99}})
 
+    def test_ending_page_uses_cover_fallback_when_reference_has_no_ending(self) -> None:
+        source = {
+            "path": "/tmp/target.pptx",
+            "slide_count": 1,
+            "slides": [{"slide_number": 1, "family_hint": "ending", "text_chars": 9}],
+        }
+        references = [
+            {
+                "path": "/tmp/reference.pptx",
+                "slide_count": 1,
+                "slides": [{"slide_number": 1, "family_hint": "cover", "text_chars": 20}],
+            }
+        ]
+
+        plan = build_plan(source, references)
+
+        self.assertEqual(plan["pages"][0]["match_mode"], "cover_fallback")
+        self.assertIn("cover fallback", plan["pages"][0]["warning"])
+
 
 if __name__ == "__main__":
     unittest.main()

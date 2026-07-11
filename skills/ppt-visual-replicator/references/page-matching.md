@@ -25,5 +25,4 @@ Do not encode customer, medical, Style1, or Style2 names in matching logic.
 
 Use exactly one primary reference page by default. Apply explicit user overrides after validating that the referenced deck and page exist.
 
-Stop when no same-family reference exists for `cover`, `table`, `chart_figure`, or `ending`. For other families, record a `content` fallback as a warning rather than silently choosing an unrelated layout.
-
+Stop when no same-family reference exists for `cover`, `table`, or `chart_figure`. When a reference deck has no explicit ending page, use its cover as the ending-page visual source and record a `cover_fallback` warning. For other families, record a `content` fallback as a warning rather than silently choosing an unrelated layout.

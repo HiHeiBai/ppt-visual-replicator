@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-STRICT_FAMILIES = {"cover", "table", "chart_figure", "ending"}
+STRICT_FAMILIES = {"cover", "table", "chart_figure"}
 
 
 class PlanError(ValueError):
@@ -73,13 +73,21 @@ def build_plan(
                         candidates.append((reference_index, ledger, slide, "same_family"))
             warning = None
             if not candidates:
+                if target_family == "ending":
+                    for reference_index, ledger in enumerate(references):
+                        for slide in ledger.get("slides", []):
+                            if slide.get("family_hint") == "cover":
+                                candidates.append((reference_index, ledger, slide, "cover_fallback"))
+                    if candidates:
+                        warning = f"target slide {target_number} used cover fallback for ending page"
                 if target_family in STRICT_FAMILIES:
                     raise PlanError(f"no {target_family} reference page exists for target slide {target_number}")
-                for reference_index, ledger in enumerate(references):
-                    for slide in ledger.get("slides", []):
-                        if slide.get("family_hint") == "content":
-                            candidates.append((reference_index, ledger, slide, "content_fallback"))
-                warning = f"target slide {target_number} used content fallback for {target_family}"
+                if not candidates:
+                    for reference_index, ledger in enumerate(references):
+                        for slide in ledger.get("slides", []):
+                            if slide.get("family_hint") == "content":
+                                candidates.append((reference_index, ledger, slide, "content_fallback"))
+                    warning = f"target slide {target_number} used content fallback for {target_family}"
             if not candidates:
                 raise PlanError(f"no credible reference page exists for target slide {target_number}")
             reference_index, reference_ledger, reference_slide, match_mode = min(

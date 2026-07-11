@@ -59,10 +59,10 @@ class VisualPlanTest(unittest.TestCase):
             self.assertEqual([slide["slide_number"] for slide in ledger["slides"]], [1, 3, 4])
             self.assertEqual(parse_slide_selection("1,3-4"), [1, 3, 4])
 
-    def test_plan_matches_same_family_and_closest_signature(self) -> None:
+    def test_plan_reuses_one_canonical_anchor_per_family(self) -> None:
         source = {
             "path": "/tmp/target.pptx",
-            "slide_count": 2,
+            "slide_count": 3,
             "slides": [
                 {
                     "slide_number": 1,
@@ -77,6 +77,14 @@ class VisualPlanTest(unittest.TestCase):
                     "family_hint": "table",
                     "text_chars": 100,
                     "picture_count": 1,
+                    "table_count": 1,
+                    "chart_count": 0,
+                },
+                {
+                    "slide_number": 3,
+                    "family_hint": "table",
+                    "text_chars": 290,
+                    "picture_count": 3,
                     "table_count": 1,
                     "chart_count": 0,
                 },
@@ -118,8 +126,10 @@ class VisualPlanTest(unittest.TestCase):
         plan = build_plan(source, references)
 
         self.assertEqual(plan["pages"][0]["reference_slide"], 1)
-        self.assertEqual(plan["pages"][1]["reference_slide"], 3)
-        self.assertEqual(plan["pages"][1]["match_mode"], "same_family")
+        table_anchors = {page["reference_slide"] for page in plan["pages"] if page["target_family"] == "table"}
+        self.assertEqual(len(table_anchors), 1)
+        self.assertEqual(plan["pages"][1]["match_mode"], "family_anchor")
+        self.assertEqual(plan["style_lock"]["anchor_policy"], "one_per_family")
 
     def test_explicit_override_wins_after_validation(self) -> None:
         source = {
@@ -163,6 +173,66 @@ class VisualPlanTest(unittest.TestCase):
 
         self.assertEqual(plan["pages"][0]["match_mode"], "cover_fallback")
         self.assertIn("cover fallback", plan["pages"][0]["warning"])
+
+    def test_default_plan_uses_only_first_reference_deck(self) -> None:
+        source = {
+            "path": "/tmp/target.pptx",
+            "slide_count": 2,
+            "slides": [
+                {"slide_number": 1, "family_hint": "cover", "text_chars": 20},
+                {"slide_number": 2, "family_hint": "content", "text_chars": 500},
+            ],
+        }
+        references = [
+            {
+                "path": "/tmp/primary.pptx",
+                "slide_count": 2,
+                "slides": [
+                    {"slide_number": 1, "family_hint": "cover", "text_chars": 10},
+                    {"slide_number": 2, "family_hint": "content", "text_chars": 50},
+                ],
+            },
+            {
+                "path": "/tmp/closer-but-secondary.pptx",
+                "slide_count": 2,
+                "slides": [
+                    {"slide_number": 1, "family_hint": "cover", "text_chars": 20},
+                    {"slide_number": 2, "family_hint": "content", "text_chars": 500},
+                ],
+            },
+        ]
+
+        plan = build_plan(source, references)
+
+        self.assertEqual({page["reference_index"] for page in plan["pages"]}, {0})
+        self.assertEqual(plan["style_lock"]["primary_reference_deck"], "/tmp/primary.pptx")
+
+    def test_secondary_reference_requires_explicit_fallback_permission(self) -> None:
+        source = {
+            "path": "/tmp/target.pptx",
+            "slide_count": 1,
+            "slides": [{"slide_number": 1, "family_hint": "table", "text_chars": 100}],
+        }
+        references = [
+            {
+                "path": "/tmp/primary.pptx",
+                "slide_count": 1,
+                "slides": [{"slide_number": 1, "family_hint": "content", "text_chars": 100}],
+            },
+            {
+                "path": "/tmp/secondary.pptx",
+                "slide_count": 1,
+                "slides": [{"slide_number": 1, "family_hint": "table", "text_chars": 100}],
+            },
+        ]
+
+        with self.assertRaisesRegex(PlanError, "primary reference deck has no table"):
+            build_plan(source, references)
+
+        plan = build_plan(source, references, allow_fallback_decks=True)
+        self.assertEqual(plan["pages"][0]["reference_index"], 1)
+        self.assertEqual(plan["pages"][0]["match_mode"], "fallback_deck")
+        self.assertIn("secondary reference deck", plan["pages"][0]["warning"])
 
 
 if __name__ == "__main__":

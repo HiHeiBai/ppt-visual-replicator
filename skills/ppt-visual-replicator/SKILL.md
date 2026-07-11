@@ -45,6 +45,8 @@ python3 scripts/prepare_visual_run.py \
 
 This writes source/reference ledgers, render directories, and `run.json`. The source ledger is the content truth source; never replace it with OCR or generated text.
 
+For a representative-page trial, add a selection such as `--slides "1,5,10,47"`. Rendering may still normalize the full source deck, but planning, generation, reconstruction, and validation remain limited to the selected pages.
+
 ### 3. Match target pages to reference pages
 
 Build the generic page-family plan:
@@ -121,4 +123,3 @@ Render and inspect every final slide at full size. Deliver only when `validation
 - Any page lacks its target, reference, prompt, output, or hash provenance.
 - Reconstruction validation fails or produces an image-only deck.
 - Required source text or critical numeric tokens cannot be reconciled.
-

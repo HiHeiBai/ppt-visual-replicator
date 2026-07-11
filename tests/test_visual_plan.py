@@ -12,7 +12,7 @@ SCRIPTS = ROOT / "skills" / "ppt-visual-replicator" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from build_visual_plan import PlanError, build_plan  # noqa: E402
-from prepare_visual_run import RunError, prepare_visual_run  # noqa: E402
+from prepare_visual_run import RunError, parse_slide_selection, prepare_visual_run  # noqa: E402
 
 
 class VisualPlanTest(unittest.TestCase):
@@ -36,6 +36,28 @@ class VisualPlanTest(unittest.TestCase):
 
             with self.assertRaisesRegex(RunError, "already exists"):
                 prepare_visual_run(target, [reference], run_dir, skip_render=True)
+
+    def test_prepare_limits_run_to_explicit_target_slides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = write_fixture_pptx(root / "target.pptx")
+            reference = write_fixture_pptx(root / "reference.pptx")
+            run_dir = root / "run"
+
+            prepare_visual_run(
+                target,
+                [reference],
+                run_dir,
+                skip_render=True,
+                slide_numbers=[1, 3, 4],
+            )
+            ledger = json.loads((run_dir / "source-ledger.json").read_text())
+
+            self.assertEqual(ledger["source_slide_count"], 4)
+            self.assertEqual(ledger["slide_count"], 3)
+            self.assertEqual(ledger["selected_slide_numbers"], [1, 3, 4])
+            self.assertEqual([slide["slide_number"] for slide in ledger["slides"]], [1, 3, 4])
+            self.assertEqual(parse_slide_selection("1,3-4"), [1, 3, 4])
 
     def test_plan_matches_same_family_and_closest_signature(self) -> None:
         source = {

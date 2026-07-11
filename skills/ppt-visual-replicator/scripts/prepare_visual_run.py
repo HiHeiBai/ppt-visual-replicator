@@ -15,6 +15,34 @@ class RunError(ValueError):
     pass
 
 
+def parse_slide_selection(value: str) -> list[int]:
+    selected: set[int] = set()
+    for part in value.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if "-" in item:
+            start_text, end_text = item.split("-", 1)
+            try:
+                start, end = int(start_text), int(end_text)
+            except ValueError as exc:
+                raise RunError(f"invalid slide range: {item}") from exc
+            if start <= 0 or end < start:
+                raise RunError(f"invalid slide range: {item}")
+            selected.update(range(start, end + 1))
+        else:
+            try:
+                number = int(item)
+            except ValueError as exc:
+                raise RunError(f"invalid slide number: {item}") from exc
+            if number <= 0:
+                raise RunError(f"invalid slide number: {item}")
+            selected.add(number)
+    if not selected:
+        raise RunError("slide selection is empty")
+    return sorted(selected)
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -68,6 +96,7 @@ def prepare_visual_run(
     run_dir: str | Path,
     *,
     skip_render: bool = False,
+    slide_numbers: list[int] | None = None,
 ) -> dict[str, Any]:
     if not references:
         raise RunError("at least one reference-style PPTX is required")
@@ -80,6 +109,19 @@ def prepare_visual_run(
         reference_ledgers = [inspect_pptx(path) for path in references]
     except InputError as exc:
         raise RunError(str(exc)) from exc
+
+    source_slide_count = int(source_ledger["slide_count"])
+    selected_slide_numbers = slide_numbers or list(range(1, source_slide_count + 1))
+    missing_slides = sorted(set(selected_slide_numbers).difference(range(1, source_slide_count + 1)))
+    if missing_slides:
+        raise RunError(f"selected target slides do not exist: {missing_slides}")
+    selected = set(selected_slide_numbers)
+    source_ledger["source_slide_count"] = source_slide_count
+    source_ledger["selected_slide_numbers"] = selected_slide_numbers
+    source_ledger["slides"] = [
+        slide for slide in source_ledger["slides"] if int(slide["slide_number"]) in selected
+    ]
+    source_ledger["slide_count"] = len(source_ledger["slides"])
 
     destination.mkdir(parents=True)
     for name in ("targets", "references", "prompts", "generated", "reconstruction"):
@@ -111,6 +153,7 @@ def prepare_visual_run(
         "reconstruction_dir": "reconstruction",
         "renderer_commands": renderer_commands,
         "rendered": not skip_render,
+        "selected_slide_numbers": selected_slide_numbers,
     }
     _write_json(destination / "source-ledger.json", source_ledger)
     _write_json(destination / "reference-ledger.json", reference_ledgers)
@@ -129,12 +172,14 @@ def main() -> int:
     parser.add_argument("--reference", action="append", required=True)
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--skip-render", action="store_true")
+    parser.add_argument("--slides", help="Target slides such as 1,3-5,9")
     args = parser.parse_args()
     manifest = prepare_visual_run(
         args.target,
         args.reference,
         args.run_dir,
         skip_render=args.skip_render,
+        slide_numbers=parse_slide_selection(args.slides) if args.slides else None,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
@@ -142,4 +187,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

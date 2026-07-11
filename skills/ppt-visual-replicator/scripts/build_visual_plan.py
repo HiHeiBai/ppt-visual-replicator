@@ -93,7 +93,12 @@ def build_plan(
             reference_index, reference_ledger, reference_slide, match_mode = min(
                 candidates,
                 key=lambda item: (
-                    _score(target, item[2], int(source.get("slide_count", 1)), int(item[1].get("slide_count", 1))),
+                    _score(
+                        target,
+                        item[2],
+                        int(source.get("source_slide_count", source.get("slide_count", 1))),
+                        int(item[1].get("slide_count", 1)),
+                    ),
                     str(item[1].get("path", "")),
                     int(item[2].get("slide_number", 0)),
                 ),

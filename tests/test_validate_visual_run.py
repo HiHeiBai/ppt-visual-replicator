@@ -1,13 +1,11 @@
 import json
 import hashlib
-import struct
 import sys
 import tempfile
 import unittest
-import zlib
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from tests.pptx_fixture import write_fixture_pptx
 
@@ -22,13 +20,34 @@ from validate_visual_run import validate_visual_run  # noqa: E402
 
 def write_png(path: Path, width: int = 1600, height: int = 900) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    signature = b"\x89PNG\r\n\x1a\n"
-    ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    Image.new("RGB", (width, height), "white").save(path)
 
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
 
-    path.write_bytes(signature + chunk(b"IHDR", ihdr_data) + chunk(b"IEND", b""))
+def write_text_layout_drift_pair(source: Path, preview: Path) -> None:
+    regular = ImageFont.load_default(size=28)
+    bold = ImageFont.load_default(size=44)
+    source_image = Image.new("RGB", (1600, 900), "white")
+    preview_image = source_image.copy()
+    source_draw = ImageDraw.Draw(source_image)
+    preview_draw = ImageDraw.Draw(preview_image)
+    for top in (210, 350, 490, 630):
+        box = (100, top, 1500, top + 100)
+        source_draw.rounded_rectangle(box, radius=10, fill="#F4F5F6")
+        preview_draw.rounded_rectangle(box, radius=10, fill="#F4F5F6")
+    title = "frontMIND: Research Background"
+    source_draw.text((50, 50), title, font=bold, fill="#075B8A")
+    preview_draw.text((50, 50), title, font=regular, fill="#075B8A")
+    lines = (
+        "Tafasitamab is a monoclonal antibody targeting CD19 on malignant B cells",
+        "Lenalidomide expands and activates effector cells and enhances ADCC",
+        "More than 40% of high-risk DLBCL patients cannot be cured",
+        "Prior studies confirmed efficacy in relapsed or refractory DLBCL",
+    )
+    for top, line in zip((245, 385, 525, 665), lines):
+        source_draw.text((170, top), line, font=regular, fill="#111111")
+        preview_draw.text((170, top + 10), line, font=regular, fill="#111111")
+    source_image.save(source)
+    preview_image.save(preview)
 
 
 def write_valid_run(root: Path) -> tuple[Path, Path, Path]:
@@ -131,8 +150,27 @@ def write_valid_run(root: Path) -> tuple[Path, Path, Path]:
         json.dumps({"schema": "ppt_visual_calibration_approval.v1", "families": approval_families}),
         encoding="utf-8",
     )
-    reconstruction = root / "reconstruction-validation.json"
+    reconstruction_run = root / "reconstruction"
+    reconstruction = reconstruction_run / "final" / "validation.json"
+    reconstruction.parent.mkdir(parents=True)
     reconstruction.write_text(json.dumps({"passed": True, "slides": 4}), encoding="utf-8")
+    reconstruction_pages = []
+    for index, job in enumerate(jobs, start=1):
+        page_id = f"page_{index:03d}"
+        page_dir = reconstruction_run / "pages" / page_id
+        page_dir.mkdir(parents=True)
+        (page_dir / "preview.png").write_bytes((run / job["output"]).read_bytes())
+        reconstruction_pages.append(
+            {
+                "page_id": page_id,
+                "status": "recorded",
+                "page_dir": f"pages/{page_id}",
+            }
+        )
+    (reconstruction_run / "page_jobs.json").write_text(
+        json.dumps({"pages": reconstruction_pages}),
+        encoding="utf-8",
+    )
     final_pptx = write_fixture_pptx(root / "final.pptx")
     return run, final_pptx, reconstruction
 
@@ -282,6 +320,49 @@ class ValidateVisualRunTest(unittest.TestCase):
             self.assertEqual(result["evidence"]["slides"], 4)
             self.assertEqual(result["evidence"]["critical_tokens_missing"], 0)
             self.assertTrue((run / "validation.json").is_file())
+
+    def test_final_stage_rejects_editable_preview_visual_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run, final_pptx, reconstruction = write_valid_run(root)
+            preview = reconstruction.parent.parent / "pages" / "page_001" / "preview.png"
+            drifted = Image.new("RGB", (1600, 900), "white")
+            ImageDraw.Draw(drifted).rectangle((0, 0, 800, 900), fill="black")
+            drifted.save(preview)
+
+            result = validate_visual_run(
+                run,
+                stage="final",
+                final_pptx=final_pptx,
+                reconstruction_validation=reconstruction,
+            )
+
+            self.assertFalse(result["passed"])
+            self.assertTrue(any("editable preview visual drift" in error for error in result["errors"]))
+
+    def test_final_stage_rejects_text_layout_drift_on_white_slide(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run, final_pptx, reconstruction = write_valid_run(root)
+            generated = run / "generated" / "page-003.png"
+            preview = reconstruction.parent.parent / "pages" / "page_003" / "preview.png"
+            write_text_layout_drift_pair(generated, preview)
+            jobs_path = run / "image-jobs.json"
+            jobs_payload = json.loads(jobs_path.read_text(encoding="utf-8"))
+            for job in jobs_payload["jobs"]:
+                if job["target_slide"] == 3:
+                    job["output_sha256"] = hashlib.sha256(generated.read_bytes()).hexdigest()
+            jobs_path.write_text(json.dumps(jobs_payload), encoding="utf-8")
+
+            result = validate_visual_run(
+                run,
+                stage="final",
+                final_pptx=final_pptx,
+                reconstruction_validation=reconstruction,
+            )
+
+            self.assertFalse(result["passed"])
+            self.assertTrue(any("editable preview visual drift" in error for error in result["errors"]))
 
 
 if __name__ == "__main__":

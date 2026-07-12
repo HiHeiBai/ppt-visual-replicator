@@ -19,6 +19,7 @@
 - Required source text and critical numeric tokens are present.
 - Each non-empty slide contains editable text or structural objects; a single full-slide image is not acceptable.
 - Complex charts, paper screenshots, and scientific illustrations may remain independent image objects.
+- Generated source images and reconstruction `preview.png` files report no editable preview visual drift. Structural validation never waives this comparison.
 - Final rendering has no clipping, overflow, broken relationships, or missing media.
 
 ## Delivery

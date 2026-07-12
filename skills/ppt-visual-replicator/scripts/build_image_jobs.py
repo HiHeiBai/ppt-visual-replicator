@@ -42,7 +42,7 @@ The second image is locked reference slide {page['reference_slide']} and is visu
 {authority}
 Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning. Preserve target logos, target page numbers, confidentiality notices, document codes, and every target footer item in their original semantic role and relative slide area; restyle them if needed, but never remove or replace them. Keep every target element fully inside the canvas with safe margins and at least 3% inset from every canvas edge. Do not crop or clip labels, pills, logos, text, charts, tables, images, or footer items. Transfer the locked reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
 
-Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, or images. Keep all target text legible, but treat generated text as provisional because exact source text will be restored during editable reconstruction.
+Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data. Reference-only brand marks (logos, wordmarks, sponsors, organization names, signatures, and watermarks) are forbidden output: remove them unless the identical brand mark existed in the target image. Never fill an empty target area with a reference logo or text. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, or images. Keep all target text legible, but treat generated text as provisional because exact source text will be restored during editable reconstruction.
 
 Return one complete slide image only. Do not add a mockup frame, perspective, hands, devices, or surrounding UI.
 """
@@ -66,15 +66,20 @@ def build_image_jobs(
     generated_dir.mkdir(exist_ok=True)
 
     first_by_family: dict[str, int] = {}
+    family_page_counts: dict[str, int] = {}
     for page in plan.get("pages", []):
         family = str(page.get("target_family", "content"))
         first_by_family.setdefault(family, int(page["target_slide"]))
+        family_page_counts[family] = family_page_counts.get(family, 0) + 1
 
     jobs = []
     for page in plan.get("pages", []):
         slide_number = int(page["target_slide"])
         family = str(page.get("target_family", "content"))
-        batch = "calibration" if first_by_family[family] == slide_number else "scale"
+        if family_page_counts[family] == 1:
+            batch = "direct"
+        else:
+            batch = "calibration" if first_by_family[family] == slide_number else "scale"
         target_rel = str(page["target_image"])
         reference_rel = str(page["reference_image"])
         target = root / target_rel
@@ -88,7 +93,7 @@ def build_image_jobs(
         output_rel = f"generated/page-{slide_number:03d}.png"
         calibration_rel = (
             None
-            if batch == "calibration"
+            if batch != "scale"
             else f"generated/page-{first_by_family[family]:03d}.png"
         )
         prompt_path = root / prompt_rel
@@ -148,7 +153,7 @@ def build_image_jobs(
 
     manifest = {
         "schema": "ppt_visual_image_jobs.v2",
-        "execution_mode": "serial_calibration_then_scale",
+        "execution_mode": "serial_direct_or_calibration_then_scale",
         "executed_phases": [],
         "calibration_approval": "calibration-approved.json",
         "jobs": jobs,
@@ -224,8 +229,9 @@ def execute_image_jobs(
     approval = _validated_approval(root) if phase == "scale" else None
     prefix = list(command_prefix or ["editppt"])
 
+    eligible_batches = {"calibration", "direct"} if phase == "calibration" else {"scale"}
     for job in manifest.get("jobs", []):
-        if job.get("batch") != phase:
+        if job.get("batch") not in eligible_batches:
             continue
         if job.get("status") == "complete" and not force:
             continue

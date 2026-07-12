@@ -7,7 +7,7 @@ description: Use when a target-content PowerPoint must adopt a reference deck's 
 
 ## Overview
 
-Transfer visual style from a reference deck to a target-content deck through a content-locked image-first workflow, then call the installed `image-to-editable-ppt` / `editppt` runtime to rebuild editable slides.
+Transfer visual style from a reference deck to a target-content deck through a content-locked image-first workflow, then use this Skill's bundled `editppt` runtime to rebuild editable slides. This is one self-contained Skill; do not require a separately installed `image-to-editable-ppt` Skill.
 
 Do not rewrite, summarize, reorder, add, or remove target content. Route content changes to a separate content-rewrite Skill.
 
@@ -17,6 +17,7 @@ Do not rewrite, summarize, reorder, add, or remove target content. Route content
 - Read `references/page-matching.md` before selecting reference slides.
 - Read `references/image-prompt-contract.md` before creating image-edit jobs.
 - Read `references/acceptance.md` before reconstruction and delivery.
+- Before reconstructing a page, read `reconstruction/references/cli-helper.md`, `reconstruction/references/manifest-schema.md`, and `reconstruction/references/page-decision-tree.md`.
 
 ## Workflow
 
@@ -27,7 +28,8 @@ Require one target-content PPTX and at least one reference-style PPTX. Reject Of
 Run:
 
 ```bash
-editppt doctor
+EDITPPT="$(python3 scripts/ensure_editppt_runtime.py --print-path)"
+"$EDITPPT" doctor
 ```
 
 Stop if the CLI, image backend, renderer, or required conversion runtime is unavailable.
@@ -67,7 +69,7 @@ Create prompts and provenance records without network calls:
 python3 scripts/build_image_jobs.py --run-dir "path/to/run"
 ```
 
-Generate only the first calibration page for each active page family:
+Generate direct pages for one-page families and only the first calibration page for every multi-page family:
 
 ```bash
 python3 scripts/build_image_jobs.py \
@@ -75,7 +77,7 @@ python3 scripts/build_image_jobs.py \
   --execute-phase calibration
 ```
 
-Review every calibration page at full size. Approve only when its title placement, margins, footer, palette, decorative language, density, and recurring chrome can govern the rest of that family. Record the approval and immutable hashes:
+Review every calibration page at full size. A one-page family is generated directly and needs no calibration approval. For every multi-page family, approve only when its title placement, margins, footer, palette, decorative language, density, and recurring chrome can govern the rest of that family. Record the approval and immutable hashes:
 
 ```bash
 python3 scripts/build_image_jobs.py \
@@ -105,23 +107,24 @@ Do not reconstruct while generated pages or provenance records are incomplete. V
 
 ### 6. Reconstruct editable slides
 
-Use the installed `image-to-editable-ppt` Skill. Start the deterministic runtime with:
+Use the bundled reconstruction runtime. Start it with:
 
 If no PaddleOCR token is configured, continue with the local `builtin-ink` text-hints backend without stopping or asking the user. This workflow-specific rule overrides the dependency Skill's optional token prompt. Treat the source ledger and generated slide as the content authority; OCR is only an optional geometry aid in this workflow.
 
 ```bash
-editppt prepare "path/to/run/generated"/*.png \
+EDITPPT="$(python3 scripts/ensure_editppt_runtime.py --print-path)"
+"$EDITPPT" prepare "path/to/run/generated"/*.png \
   --job-dir "path/to/run/reconstruction"
-editppt run next "path/to/run/reconstruction"
+"$EDITPPT" run next "path/to/run/reconstruction"
 ```
 
-Follow the required page-worker dispatch, record, and retry rules from `image-to-editable-ppt`. Finalize only after every page is recorded:
+Generate worker prompts with `reconstruction/scripts/build-page-worker-prompt.py`, then follow its bundled page-worker contract for dispatch, record, and retry. For a single-page run, claim it with `--local` and rebuild it locally; multi-page runs require page workers. Finalize only after every page is recorded:
 
 ```bash
-editppt run finalize "path/to/run/reconstruction"
+"$EDITPPT" run finalize "path/to/run/reconstruction"
 ```
 
-Do not copy or fork the reconstruction implementation into this Skill.
+Do not substitute a separate reconstruction Skill or a custom page builder for this bundled runtime.
 
 ### 7. Validate and deliver
 
@@ -135,7 +138,7 @@ python3 scripts/validate_visual_run.py \
   --reconstruction-validation "path/to/reconstruction/final/validation.json"
 ```
 
-Render and inspect every final slide at full size. Deliver only when `validation.json` has `passed: true`.
+Render and inspect every final slide at full size. The final validator must compare each reconstruction `preview.png` with its generated source image and reject editable preview visual drift; an `editppt` structural pass alone is insufficient. Deliver only when `validation.json` has `passed: true`.
 
 ## Stop conditions
 

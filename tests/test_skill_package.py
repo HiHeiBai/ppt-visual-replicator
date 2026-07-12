@@ -1,4 +1,6 @@
 import unittest
+import json
+import subprocess
 from pathlib import Path
 
 
@@ -14,8 +16,8 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("target-content PPTX", text)
         self.assertIn("reference-style PPTX", text)
         self.assertIn("editppt image edit", text)
-        self.assertIn("editppt prepare", text)
-        self.assertIn("editppt run finalize", text)
+        self.assertIn('"$EDITPPT" prepare', text)
+        self.assertIn('"$EDITPPT" run finalize', text)
         self.assertIn("Do not rewrite", text)
 
         for reference in (
@@ -49,6 +51,40 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("`builtin-ink`", text)
         self.assertIn("without stopping or asking the user", text)
 
+    def test_skill_vendors_its_editable_ppt_runtime_and_worker_contract(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts/ensure_editppt_runtime.py", text)
+        self.assertIn("reconstruction/scripts/build-page-worker-prompt.py", text)
+        self.assertNotIn("Use the installed `image-to-editable-ppt`", text)
+        for path in (
+            "scripts/ensure_editppt_runtime.py",
+            "reconstruction/scripts/build-page-worker-prompt.py",
+            "reconstruction/prompts/page-worker.md",
+            "reconstruction/references/cli-helper.md",
+            "reconstruction/references/manifest-schema.md",
+            "reconstruction/references/page-decision-tree.md",
+            "reconstruction/cli/pyproject.toml",
+            "reconstruction/cli/editppt/runtime/main.py",
+        ):
+            self.assertTrue((SKILL / path).is_file(), path)
+
+    def test_runtime_bootstrap_uses_a_compatible_installer(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                str(SKILL / "scripts" / "ensure_editppt_runtime.py"),
+                "--force",
+                "--dry-run",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(Path(payload["install_command"][0]).name, "uv")
+        self.assertEqual(payload["install_command"][1:3], ["tool", "install"])
+
     def test_acceptance_requires_deck_and_calibration_consistency(self) -> None:
         text = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")
 
@@ -57,6 +93,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("calibration-approved.json", text)
         self.assertIn("approved calibration hash", text)
         self.assertIn("reference-copy drift", text)
+        self.assertIn("editable preview visual drift", text)
 
     def test_page_matching_separates_single_image_content(self) -> None:
         text = (SKILL / "references" / "page-matching.md").read_text(encoding="utf-8")

@@ -21,10 +21,11 @@ Every prompt must require:
 - Keep every target element fully inside the canvas with safe margins and at least 3% inset from every canvas edge. Do not crop or clip labels, pills, logos, text, charts, tables, images, or footer items.
 - Transfer the reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
 - Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data.
+- Reference-only brand marks (logos, wordmarks, sponsors, organization names, signatures, and watermarks) are forbidden output unless the identical mark existed in the target image; never fill an empty target area with reference branding or text.
 - Do not add or remove target claims, numbers, charts, tables, citations, or images.
 - Keep text legible, but treat generated text as provisional because exact text is restored during editable reconstruction.
 - Return one complete slide image without mockup frames, perspective, hands, devices, or surrounding UI.
 
 Record target, reference, prompt, output, model, size, quality, status, and SHA-256 values for every page.
 
-Do not execute scale jobs until `calibration-approved.json` records the current output hash for every active family. If an approved calibration output changes, invalidate scale execution and require approval again.
+For a one-page family, generate that page directly with the target and the locked reference; no calibration approval is required. Do not execute scale jobs until `calibration-approved.json` records the current output hash for every multi-page family. If an approved calibration output changes, invalidate scale execution and require approval again.

@@ -48,6 +48,124 @@ def _visual_structure_distance(left: Path, right: Path) -> float | None:
     )
 
 
+def _visual_pixel_mean_distance(left: Path, right: Path) -> float | None:
+    try:
+        with Image.open(left) as left_image, Image.open(right) as right_image:
+            left_values = list(left_image.convert("RGB").resize((128, 72)).getdata())
+            right_values = list(right_image.convert("RGB").resize((128, 72)).getdata())
+    except (OSError, UnidentifiedImageError):
+        return None
+    channel_delta = sum(
+        abs(left_channel - right_channel)
+        for left_pixel, right_pixel in zip(left_values, right_values)
+        for left_channel, right_channel in zip(left_pixel, right_pixel)
+    )
+    return channel_delta / (len(left_values) * 3)
+
+
+def _visual_ink_projection_distance(left: Path, right: Path) -> float | None:
+    try:
+        with Image.open(left) as left_image, Image.open(right) as right_image:
+            images = (
+                left_image.convert("L").resize((320, 180)),
+                right_image.convert("L").resize((320, 180)),
+            )
+            projections = []
+            for image in images:
+                values = list(image.getdata())
+                ink = [value < 200 for value in values]
+                rows = [sum(ink[top * 320 : (top + 1) * 320]) for top in range(180)]
+                columns = [sum(ink[left + top * 320] for top in range(180)) for left in range(320)]
+                projections.append((rows, columns, sum(ink)))
+    except (OSError, UnidentifiedImageError):
+        return None
+    (left_rows, left_columns, left_ink), (right_rows, right_columns, right_ink) = projections
+    denominator = max(1, left_ink + right_ink)
+    row_distance = sum(
+        abs(left_count - right_count)
+        for left_count, right_count in zip(left_rows, right_rows)
+    ) / denominator
+    column_distance = sum(
+        abs(left_count - right_count)
+        for left_count, right_count in zip(left_columns, right_columns)
+    ) / denominator
+    return max(row_distance, column_distance)
+
+
+def _reconstruction_preview_checks(
+    root: Path,
+    reconstruction_validation: Path,
+    errors: list[str],
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "editable_preview_checks": 0,
+        "editable_preview_visual_drifts": 0,
+        "editable_preview_max_structure_distance": 0.0,
+        "editable_preview_max_pixel_distance": 0.0,
+        "editable_preview_max_ink_projection_distance": 0.0,
+    }
+    if reconstruction_validation.parent.name != "final":
+        errors.append("reconstruction validation must be inside the reconstruction run final directory")
+        return evidence
+    reconstruction_root = reconstruction_validation.parent.parent
+    try:
+        page_jobs = json.loads((reconstruction_root / "page_jobs.json").read_text(encoding="utf-8"))
+        plan = json.loads((root / "visual-plan.json").read_text(encoding="utf-8"))
+        image_jobs = json.loads((root / "image-jobs.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"reconstruction preview evidence is unavailable: {exc}")
+        return evidence
+
+    reconstruction_pages = page_jobs.get("pages", [])
+    planned_pages = plan.get("pages", [])
+    if len(reconstruction_pages) != len(planned_pages):
+        errors.append(
+            "reconstruction preview count mismatch: "
+            f"expected {len(planned_pages)}, found {len(reconstruction_pages)}"
+        )
+        return evidence
+    jobs_by_slide = {
+        int(job.get("target_slide", 0)): job for job in image_jobs.get("jobs", [])
+    }
+    for planned, reconstructed in zip(planned_pages, reconstruction_pages):
+        slide = int(planned["target_slide"])
+        job = jobs_by_slide.get(slide)
+        if not job:
+            errors.append(f"missing generated image job for editable preview check: slide {slide}")
+            continue
+        generated = root / str(job.get("output", ""))
+        page_dir = reconstruction_root / str(reconstructed.get("page_dir", ""))
+        preview = page_dir / "preview.png"
+        if not generated.is_file() or not preview.is_file():
+            errors.append(f"missing editable preview evidence for slide {slide}")
+            continue
+        structure_distance = _visual_structure_distance(generated, preview)
+        pixel_distance = _visual_pixel_mean_distance(generated, preview)
+        ink_projection_distance = _visual_ink_projection_distance(generated, preview)
+        if structure_distance is None or pixel_distance is None or ink_projection_distance is None:
+            errors.append(f"invalid editable preview evidence for slide {slide}")
+            continue
+        evidence["editable_preview_checks"] += 1
+        evidence["editable_preview_max_structure_distance"] = max(
+            evidence["editable_preview_max_structure_distance"], round(structure_distance, 2)
+        )
+        evidence["editable_preview_max_pixel_distance"] = max(
+            evidence["editable_preview_max_pixel_distance"], round(pixel_distance, 2)
+        )
+        evidence["editable_preview_max_ink_projection_distance"] = max(
+            evidence["editable_preview_max_ink_projection_distance"],
+            round(ink_projection_distance, 3),
+        )
+        if structure_distance > 5.0 or pixel_distance > 12.0 or ink_projection_distance > 0.22:
+            evidence["editable_preview_visual_drifts"] += 1
+            errors.append(
+                f"editable preview visual drift on slide {slide}: "
+                f"structure_distance={structure_distance:.2f}, pixel_distance={pixel_distance:.2f}, "
+                f"ink_projection_distance={ink_projection_distance:.3f}"
+            )
+    return evidence
+
+
 def _style_consistency_checks(
     root: Path,
     plan: dict[str, Any],
@@ -246,7 +364,7 @@ def _final_checks(
     reconstruction_validation: Path | None,
     errors: list[str],
     warnings: list[str],
-) -> dict[str, int]:
+) -> dict[str, Any]:
     evidence = {
         "slides": 0,
         "critical_tokens_checked": 0,
@@ -264,6 +382,10 @@ def _final_checks(
         payload = json.loads(reconstruction_validation.read_text(encoding="utf-8"))
         if payload.get("passed") is not True:
             errors.append("reconstruction validation did not pass")
+        else:
+            evidence.update(
+                _reconstruction_preview_checks(root, reconstruction_validation, errors)
+            )
 
     source_path = root / "source-ledger.json"
     if not source_path.is_file():

@@ -149,12 +149,35 @@ class ImageJobsTest(unittest.TestCase):
             self.assertEqual(
                 batches,
                 [
-                    (1, "cover", "calibration"),
+                    (1, "cover", "direct"),
                     (2, "content", "calibration"),
                     (3, "content", "scale"),
-                    (4, "table", "calibration"),
+                    (4, "table", "direct"),
                 ],
             )
+
+    def test_single_page_family_runs_directly_without_calibration_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_dir = write_run(root / "run", page_count=1, families=["content"])
+            fake = root / "fake_editppt.py"
+            fake.write_text(
+                "import pathlib, sys\n"
+                "args = sys.argv[1:]\n"
+                "pathlib.Path(args[args.index('--out') + 1]).write_bytes(b'generated-image')\n",
+                encoding="utf-8",
+            )
+
+            manifest = build_image_jobs(run_dir)
+            self.assertEqual(manifest["jobs"][0]["batch"], "direct")
+            completed = execute_image_jobs(
+                run_dir,
+                phase="calibration",
+                command_prefix=[sys.executable, str(fake)],
+            )
+
+            self.assertEqual(completed["jobs"][0]["status"], "complete")
+            self.assertFalse((run_dir / "calibration-approved.json").exists())
 
     def test_prompt_preserves_target_recurring_identifiers_and_footer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,6 +194,7 @@ class ImageJobsTest(unittest.TestCase):
             self.assertIn("inside the canvas with safe margins", prompt)
             self.assertIn("at least 3% inset", prompt)
             self.assertIn("Do not crop or clip", prompt)
+            self.assertIn("Reference-only brand marks", prompt)
 
     def test_retries_one_transient_image_backend_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

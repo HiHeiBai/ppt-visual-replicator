@@ -65,6 +65,8 @@ class ImageJobsTest(unittest.TestCase):
             self.assertEqual(len(first["reference_sha256"]), 64)
             self.assertEqual(len(first["prompt_sha256"]), 64)
             self.assertIsNone(first["output_sha256"])
+            self.assertEqual(first["size"], "2560x1440")
+            self.assertEqual(first["command"][first["command"].index("--size") + 1], "2560x1440")
             images = [first["command"][i + 1] for i, value in enumerate(first["command"]) if value == "--image"]
             self.assertEqual(
                 images,
@@ -122,8 +124,16 @@ class ImageJobsTest(unittest.TestCase):
             self.assertTrue(all(job["output_sha256"] for job in manifest["jobs"]))
             scale = next(job for job in manifest["jobs"] if job["batch"] == "scale")
             images = [scale["command"][i + 1] for i, value in enumerate(scale["command"]) if value == "--image"]
-            self.assertEqual(len(images), 3)
-            self.assertEqual(images[2], str(run_dir.resolve() / "generated/page-001.png"))
+            self.assertEqual(
+                images,
+                [
+                    str(run_dir.resolve() / scale["target_image"]),
+                    str(run_dir.resolve() / "generated/page-001.png"),
+                ],
+            )
+            scale_prompt = (run_dir / scale["prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("approved calibration slide's layout skeleton", scale_prompt)
+            self.assertIn("Do not preserve the target's original visual layout", scale_prompt)
 
     def test_first_page_of_each_family_is_a_calibration_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -145,6 +155,52 @@ class ImageJobsTest(unittest.TestCase):
                     (4, "table", "calibration"),
                 ],
             )
+
+    def test_prompt_preserves_target_recurring_identifiers_and_footer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = write_run(Path(temp_dir) / "run", page_count=1)
+
+            manifest = build_image_jobs(run_dir)
+
+            prompt = (run_dir / manifest["jobs"][0]["prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("target logos", prompt)
+            self.assertIn("target page numbers", prompt)
+            self.assertIn("confidentiality notices", prompt)
+            self.assertIn("document codes", prompt)
+            self.assertIn("target footer", prompt)
+            self.assertIn("inside the canvas with safe margins", prompt)
+            self.assertIn("at least 3% inset", prompt)
+            self.assertIn("Do not crop or clip", prompt)
+
+    def test_retries_one_transient_image_backend_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_dir = write_run(root / "run", page_count=1)
+            counter = root / "counter.txt"
+            fake = root / "flaky_editppt.py"
+            fake.write_text(
+                "import pathlib, sys\n"
+                f"counter = pathlib.Path({str(counter)!r})\n"
+                "attempt = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+                "counter.write_text(str(attempt))\n"
+                "if attempt == 1: raise SystemExit(1)\n"
+                "args = sys.argv[1:]\n"
+                "pathlib.Path(args[args.index('--out') + 1]).write_bytes(b'generated-image')\n",
+                encoding="utf-8",
+            )
+            build_image_jobs(run_dir)
+
+            try:
+                manifest = execute_image_jobs(
+                    run_dir,
+                    phase="calibration",
+                    command_prefix=[sys.executable, str(fake)],
+                )
+            except JobError as exc:
+                self.fail(f"image backend did not retry: {exc}")
+
+            self.assertEqual(counter.read_text(), "2")
+            self.assertEqual(manifest["jobs"][0]["status"], "complete")
 
     def test_refuses_to_overwrite_generated_pages_without_force(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

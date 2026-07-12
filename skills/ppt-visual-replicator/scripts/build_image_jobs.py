@@ -13,6 +13,9 @@ class JobError(ValueError):
     pass
 
 
+IMAGE_SIZE = "2560x1440"
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -26,17 +29,18 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _prompt(page: dict[str, Any], batch: str) -> str:
-    calibration_note = ""
     if batch == "scale":
-        calibration_note = """
-The third image is the approved generated calibration slide for this page family. Treat it as the strongest authority for the actual generated deck language: title placement, margins, footer position, palette, decorative density, and recurring chrome. Keep this slide consistent with that approved output.
+        authority = """The first image is the target slide and is the edit target and content authority.
+The second image is the approved generated calibration slide for this page family and is the layout and visual-style authority. Reuse the approved calibration slide's layout skeleton, title placement, margins, content containers, footer position, palette, decorative density, and recurring chrome. Map the target's logical content groups into that skeleton. Do not preserve the target's original visual layout. Change the calibration skeleton only when target content has a genuinely different number or type of logical groups, and keep the same deck-level geometry when adapting it.
+"""
+    else:
+        authority = f"""The first image is target slide {page['target_slide']} and is the edit target and content authority.
+The second image is locked reference slide {page['reference_slide']} and is visual-style authority only.
 """
     return f"""Redesign one complete 16:9 presentation slide.
 
-The first image is target slide {page['target_slide']} and is the edit target and content authority.
-The second image is locked reference slide {page['reference_slide']} and is visual-style authority only.
-{calibration_note}
-Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning. Transfer the locked reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
+{authority}
+Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning. Preserve target logos, target page numbers, confidentiality notices, document codes, and every target footer item in their original semantic role and relative slide area; restyle them if needed, but never remove or replace them. Keep every target element fully inside the canvas with safe margins and at least 3% inset from every canvas edge. Do not crop or clip labels, pills, logos, text, charts, tables, images, or footer items. Transfer the locked reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
 
 Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, or images. Keep all target text legible, but treat generated text as provisional because exact source text will be restored during editable reconstruction.
 
@@ -98,17 +102,18 @@ def build_image_jobs(
             "edit",
             "--image",
             str(target),
-            "--image",
-            str(reference),
         ]
-        if calibration_rel:
-            command.extend(["--image", str(root / calibration_rel)])
+        command.extend(
+            ["--image", str(root / calibration_rel)]
+            if calibration_rel
+            else ["--image", str(reference)]
+        )
         command.extend(
             [
                 "--prompt-file",
                 str(prompt_path),
                 "--size",
-                "1920x1080",
+                IMAGE_SIZE,
                 "--quality",
                 "high",
                 "--out",
@@ -133,7 +138,7 @@ def build_image_jobs(
                 "output": output_rel,
                 "output_sha256": None,
                 "model": "gpt-image-2",
-                "size": "1920x1080",
+                "size": IMAGE_SIZE,
                 "quality": "high",
                 "command": command,
                 "status": "ready",
@@ -239,13 +244,24 @@ def execute_image_jobs(
         command = prefix + list(job["command"])[1:]
         if force:
             command.append("--force")
-        try:
-            subprocess.run(command, check=True)
-        except (OSError, subprocess.CalledProcessError) as exc:
+        last_error: OSError | subprocess.CalledProcessError | None = None
+        for attempt in range(2):
+            try:
+                subprocess.run(command, check=True)
+                last_error = None
+                break
+            except (OSError, subprocess.CalledProcessError) as exc:
+                last_error = exc
+                if attempt == 0:
+                    output_path.unlink(missing_ok=True)
+                    continue
+        if last_error is not None:
             job["status"] = "failed"
-            job["error"] = str(exc)
+            job["error"] = str(last_error)
             _write_json(root / "image-jobs.json", manifest)
-            raise JobError(f"image generation failed for slide {job['target_slide']}: {exc}") from exc
+            raise JobError(
+                f"image generation failed for slide {job['target_slide']} after retry: {last_error}"
+            ) from last_error
         if not output_path.is_file():
             raise JobError(f"image backend did not create output: {output_path}")
         job["status"] = "complete"

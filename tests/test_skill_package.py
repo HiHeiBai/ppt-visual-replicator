@@ -38,6 +38,17 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("--stage generated", text)
         self.assertIn("mixed automatic reference decks", text)
 
+    def test_skill_documents_glyph_preflight(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("missing glyphs", text)
+
+    def test_reconstruction_defaults_to_offline_text_hints_without_prompting(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("`builtin-ink`", text)
+        self.assertIn("without stopping or asking the user", text)
+
     def test_acceptance_requires_deck_and_calibration_consistency(self) -> None:
         text = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")
 
@@ -45,6 +56,17 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("one automatic reference anchor per page family", text)
         self.assertIn("calibration-approved.json", text)
         self.assertIn("approved calibration hash", text)
+        self.assertIn("reference-copy drift", text)
+
+    def test_page_matching_separates_single_image_content(self) -> None:
+        text = (SKILL / "references" / "page-matching.md").read_text(encoding="utf-8")
+
+        self.assertIn("`image_content`", text)
+
+    def test_scale_prompt_uses_target_and_calibration_only(self) -> None:
+        text = (SKILL / "references" / "image-prompt-contract.md").read_text(encoding="utf-8")
+
+        self.assertIn("Do not send the original reference page again", text)
 
     def test_openai_metadata_matches_skill(self) -> None:
         text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")

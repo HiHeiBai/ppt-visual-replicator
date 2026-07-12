@@ -7,6 +7,8 @@ import unittest
 import zlib
 from pathlib import Path
 
+from PIL import Image, ImageDraw
+
 from tests.pptx_fixture import write_fixture_pptx
 
 
@@ -136,6 +138,34 @@ def write_valid_run(root: Path) -> tuple[Path, Path, Path]:
 
 
 class ValidateVisualRunTest(unittest.TestCase):
+    def test_generated_stage_rejects_reference_copy_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run, _, _ = write_valid_run(Path(temp_dir))
+            target = run / "targets/page-003.png"
+            reference = run / "references/reference-01/page-002.png"
+            output = run / "generated/page-003.png"
+
+            target_image = Image.new("RGB", (640, 360), "white")
+            ImageDraw.Draw(target_image).rectangle((40, 80, 280, 300), fill="black")
+            target_image.save(target)
+            reference_image = Image.new("RGB", (640, 360), "white")
+            ImageDraw.Draw(reference_image).rectangle((360, 40, 600, 320), fill="black")
+            reference_image.save(reference)
+            reference_image.save(output)
+
+            jobs_path = run / "image-jobs.json"
+            manifest = json.loads(jobs_path.read_text(encoding="utf-8"))
+            job = next(item for item in manifest["jobs"] if item["target_slide"] == 3)
+            job["target_sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+            job["reference_sha256"] = hashlib.sha256(reference.read_bytes()).hexdigest()
+            job["output_sha256"] = hashlib.sha256(output.read_bytes()).hexdigest()
+            jobs_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = validate_visual_run(run, stage="generated")
+
+            self.assertFalse(result["passed"])
+            self.assertTrue(any("resembles the reference more than the target" in error for error in result["errors"]))
+
     def test_generated_stage_rejects_multiple_automatic_reference_decks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run, _, _ = write_valid_run(Path(temp_dir))

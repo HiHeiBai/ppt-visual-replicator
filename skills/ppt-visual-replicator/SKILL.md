@@ -43,7 +43,7 @@ python3 scripts/prepare_visual_run.py \
   --run-dir "path/to/run"
 ```
 
-This writes source/reference ledgers, render directories, and `run.json`. The source ledger is the content truth source; never replace it with OCR or generated text.
+This writes source/reference ledgers, render directories, and `run.json`. Inspect at least one rendered target and reference page before paid generation. Stop on missing glyphs, substituted blank text, or clipped content. The source ledger is the content truth source; never replace it with OCR or generated text.
 
 For a representative-page trial, add a selection such as `--slides "1,5,10,47"`. Rendering may still normalize the full source deck, but planning, generation, reconstruction, and validation remain limited to the selected pages.
 
@@ -91,7 +91,7 @@ python3 scripts/build_image_jobs.py \
   --execute-phase scale
 ```
 
-Calibration jobs must call `editppt image edit` with the target slide first and the locked family reference anchor second. Scale jobs must pass those two images followed by the approved generated calibration page for that family. Retry only failed pages.
+Calibration jobs must call `editppt image edit` with the target slide first and the locked family reference anchor second. Scale jobs must pass the target slide followed by the approved generated calibration page; do not resend the original reference page. Retry only failed pages.
 
 ### 5. Validate generated pages
 
@@ -106,6 +106,8 @@ Do not reconstruct while generated pages or provenance records are incomplete. V
 ### 6. Reconstruct editable slides
 
 Use the installed `image-to-editable-ppt` Skill. Start the deterministic runtime with:
+
+If no PaddleOCR token is configured, continue with the local `builtin-ink` text-hints backend without stopping or asking the user. This workflow-specific rule overrides the dependency Skill's optional token prompt. Treat the source ledger and generated slide as the content authority; OCR is only an optional geometry aid in this workflow.
 
 ```bash
 editppt prepare "path/to/run/generated"/*.png \
@@ -138,6 +140,7 @@ Render and inspect every final slide at full size. Deliver only when `validation
 ## Stop conditions
 
 - Target or reference inputs are missing, invalid, or temporary lock files.
+- Rendered target or reference pages contain missing glyphs, blank substituted text, or clipped source content.
 - A target page has no credible reference-family match.
 - `visual-plan.json` has no primary deck lock, contains mixed automatic reference decks, or assigns multiple automatic anchors to one page family.
 - Scale jobs exist without `calibration-approved.json`, or an approved calibration hash no longer matches the generated calibration page.

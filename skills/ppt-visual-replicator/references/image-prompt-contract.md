@@ -1,17 +1,24 @@
 # Image Prompt Contract
 
-Use `editppt image edit` with two ordered image inputs:
+For calibration jobs, use `editppt image edit` with two ordered image inputs:
 
 1. Target slide image: edit target and content authority.
 2. Reference slide image: visual-style authority only.
 
-Generate the first target page in every active family as a calibration page. Review those pages before approving them. For every later page in the family, add a third ordered input:
+Generate the first target page in every active family as a calibration page. Review those pages before approving them. For every later page in the family, use two ordered inputs:
 
-3. Approved generated calibration page: strongest authority for the actual deck-level title position, margins, footer, palette, decorative density, and recurring chrome.
+1. Target slide image: edit target and content authority.
+2. Approved generated calibration page: layout and visual-style authority for the layout skeleton, title position, margins, content containers, footer, palette, decorative density, and recurring chrome.
+
+For scale jobs, map the target's logical content groups into the calibration layout skeleton. Do not preserve the target's original visual layout. Change the skeleton only when the target has a genuinely different number or type of logical groups, and preserve the same deck-level geometry when adapting it.
+
+Do not send the original reference page again during scale generation. It already influenced the approved calibration page and can cause reference wording, charts, or study facts to leak into later target pages.
 
 Every prompt must require:
 
 - Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, and source-image meaning.
+- Preserve target logos, page numbers, confidentiality notices, document codes, and every target footer item in the same semantic role and relative slide area. Restyle them when needed, but never remove or replace them.
+- Keep every target element fully inside the canvas with safe margins and at least 3% inset from every canvas edge. Do not crop or clip labels, pills, logos, text, charts, tables, images, or footer items.
 - Transfer the reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
 - Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data.
 - Do not add or remove target claims, numbers, charts, tables, citations, or images.

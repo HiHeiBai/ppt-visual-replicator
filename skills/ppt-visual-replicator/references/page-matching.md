@@ -9,11 +9,14 @@ Classify target and reference pages as one of:
 - `section`
 - `table`
 - `chart_figure`
+- `image_content`
 - `content`
 - `conclusion`
 - `ending`
 
 Do not encode customer, medical, Style1, or Style2 names in matching logic.
+
+Use `image_content` for pages with one source image plus explanatory text, such as a paper screenshot, product image, or evidence excerpt. Do not group those pages with text-only `content` pages.
 
 ## Matching order
 

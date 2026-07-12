@@ -42,6 +42,36 @@ class PptxInspectTest(unittest.TestCase):
             with self.assertRaisesRegex(InputError, "Office lock"):
                 inspect_pptx(path)
 
+    def test_classifies_spaced_chinese_toc_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = write_fixture_pptx(
+                Path(temp_dir) / "spaced-toc.pptx",
+                slides=[
+                    {"texts": ["Title"]},
+                    {"texts": ["目 录", "研究背景", "研究结果"]},
+                    {"texts": ["THANK YOU"]},
+                ],
+            )
+
+            result = inspect_pptx(path)
+
+        self.assertEqual(result["slides"][1]["family_hint"], "toc")
+
+    def test_classifies_single_evidence_image_page_as_image_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = write_fixture_pptx(
+                Path(temp_dir) / "evidence-image.pptx",
+                slides=[
+                    {"texts": ["Title"]},
+                    {"texts": ["Study title", "2026 ASCO LBA 7000"], "pictures": 1},
+                    {"texts": ["THANK YOU"]},
+                ],
+            )
+
+            result = inspect_pptx(path)
+
+        self.assertEqual(result["slides"][1]["family_hint"], "image_content")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageFilter, UnidentifiedImageError
+
 from pptx_inspect import InputError, inspect_pptx
 
 
@@ -28,6 +30,22 @@ def _png_size(path: Path) -> tuple[int, int]:
 
 def _normalize(text: str) -> str:
     return "".join(text.split()).lower()
+
+
+def _visual_structure_distance(left: Path, right: Path) -> float | None:
+    try:
+        with Image.open(left) as left_image, Image.open(right) as right_image:
+            left_values = list(
+                left_image.convert("L").resize((64, 36)).filter(ImageFilter.GaussianBlur(1)).getdata()
+            )
+            right_values = list(
+                right_image.convert("L").resize((64, 36)).filter(ImageFilter.GaussianBlur(1)).getdata()
+            )
+    except (OSError, UnidentifiedImageError):
+        return None
+    return sum(abs(left_value - right_value) for left_value, right_value in zip(left_values, right_values)) / len(
+        left_values
+    )
 
 
 def _style_consistency_checks(
@@ -154,6 +172,8 @@ def _generated_checks(root: Path, errors: list[str], warnings: list[str]) -> dic
         "planned_pages": 0,
         "generated_pages": 0,
         "provenance_files_checked": 0,
+        "visual_structure_checks": 0,
+        "reference_copy_risks": 0,
     }
     try:
         plan = json.loads((root / "visual-plan.json").read_text(encoding="utf-8"))
@@ -203,6 +223,20 @@ def _generated_checks(root: Path, errors: list[str], warnings: list[str]) -> dic
                     evidence["generated_pages"] += 1
                 except ValueError as exc:
                     errors.append(f"invalid generated page for target slide {slide}: {exc}")
+        target_path = root / str(job.get("target_image", ""))
+        reference_path = root / str(job.get("reference_image", ""))
+        output_path = root / str(job.get("output", ""))
+        if target_path.is_file() and reference_path.is_file() and output_path.is_file():
+            target_distance = _visual_structure_distance(output_path, target_path)
+            reference_distance = _visual_structure_distance(output_path, reference_path)
+            if target_distance is not None and reference_distance is not None:
+                evidence["visual_structure_checks"] += 1
+                if target_distance >= 12 and reference_distance < target_distance * 0.5:
+                    evidence["reference_copy_risks"] += 1
+                    errors.append(
+                        f"generated page resembles the reference more than the target on slide {slide}: "
+                        f"target_distance={target_distance:.2f}, reference_distance={reference_distance:.2f}"
+                    )
     return evidence
 
 

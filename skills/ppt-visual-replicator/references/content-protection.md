@@ -7,7 +7,7 @@ Treat the target PPTX source ledger as authoritative. Generated pixels and OCR a
 ## Required preservation
 
 - Preserve slide order and slide count unless the user limits the page range.
-- Preserve every visible title, body block, label, citation, footer, and registered native object.
+- Preserve every visible title, body block, label, citation, logo, page number, confidentiality notice, document code, footer, and registered native object.
 - Preserve numbers, percentages, sample sizes, dates, doses, HR, CI, P values, and units exactly.
 - Preserve charts, tables, paper screenshots, and source images unless the user explicitly authorizes removal.
 - Preserve speaker notes when the reconstruction runtime supports them.
@@ -20,4 +20,3 @@ Treat the target PPTX source ledger as authoritative. Generated pixels and OCR a
 - Do not accept a full-slide screenshot plus editable text overlay as an editable reconstruction.
 
 When content cannot be preserved reliably, fail the page and record the reason.
-

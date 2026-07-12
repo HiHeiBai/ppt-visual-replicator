@@ -44,9 +44,10 @@ def _slide_family(
     chart_count: int,
 ) -> str:
     joined = " ".join(texts).lower()
+    compact = "".join(joined.split())
     if any(marker in joined for marker in ("thank you", "谢谢", "感谢聆听")):
         return "ending"
-    if any(marker in joined for marker in ("目录", "agenda", "contents")):
+    if "目录" in compact or any(marker in joined for marker in ("agenda", "contents")):
         return "toc"
     if slide_number == 1:
         return "cover"
@@ -56,6 +57,8 @@ def _slide_family(
         return "chart_figure"
     if any(marker in joined for marker in ("结论", "总结", "conclusion", "summary")):
         return "conclusion"
+    if picture_count == 1:
+        return "image_content"
     if slide_number == slide_count and len(joined) <= 40:
         return "ending"
     if len(joined) <= 40 and picture_count == 0:

@@ -6,6 +6,7 @@
 - Use one automatic reference anchor per page family; record explicit page overrides separately as warnings.
 - Every scale family has an entry in `calibration-approved.json`.
 - Every approved calibration hash still matches the calibration image, and every scale job records that approved hash.
+- Structural similarity checks report no reference-copy drift; a generated page must remain structurally closer to its target than to the reference content.
 - One generated image exists for every planned target page.
 - Every image has the expected aspect ratio and non-zero dimensions.
 - Every job records target, reference, prompt, and output provenance.

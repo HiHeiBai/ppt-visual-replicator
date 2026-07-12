@@ -1,153 +1,69 @@
 ---
 name: ppt-visual-replicator
-description: Use when a target-content PowerPoint must adopt a reference deck's visual style through image generation and return to an object-level editable PPTX without rewriting the content, including 复刻参考PPT风格, reference-style redesign, and image-to-editable-PowerPoint requests.
+description: Use when a specific target PowerPoint slide must be redrawn in a specific reference slide's visual style and returned as an editable PPTX, without rewriting the target content.
 ---
 
 # PPT Visual Replicator
 
-## Overview
+Redraw one selected target slide from one selected reference slide, then rebuild it as editable PowerPoint. This is one self-contained Skill with a bundled `editppt` runtime.
 
-Transfer visual style from a reference deck to a target-content deck through a content-locked image-first workflow, then use this Skill's bundled `editppt` runtime to rebuild editable slides. This is one self-contained Skill; do not require a separately installed `image-to-editable-ppt` Skill.
+Do not rewrite, summarize, reorder, add, or remove target content.
 
-Do not rewrite, summarize, reorder, add, or remove target content. Route content changes to a separate content-rewrite Skill.
+## Inputs
 
-## Required references
+Require:
 
-- Read `references/content-protection.md` before inspecting or generating pages.
-- Read `references/page-matching.md` before selecting reference slides.
-- Read `references/image-prompt-contract.md` before creating image-edit jobs.
-- Read `references/acceptance.md` before reconstruction and delivery.
-- Before reconstructing a page, read `reconstruction/references/cli-helper.md`, `reconstruction/references/manifest-schema.md`, and `reconstruction/references/page-decision-tree.md`.
+- Target PPTX and target slide number.
+- Reference-style PPTX and reference slide number.
+
+Read `references/content-protection.md` before generation and `references/acceptance.md` before delivery. Before reconstruction, read the three files in `reconstruction/references/`.
 
 ## Workflow
 
-### 1. Preflight
+### 1. Prepare exactly two slides
 
-Require one target-content PPTX and at least one reference-style PPTX. Reject Office lock files such as `.~*.pptx`. Preserve every input file.
+```bash
+python3 scripts/prepare_direct_page.py \
+  --target "target.pptx" --target-slide 34 \
+  --reference "reference.pptx" --reference-slide 39 \
+  --run-dir "output/direct-page-034"
+```
 
-Run:
+Inspect `target.png` and `reference.png`. Stop only if either image is visibly corrupted, missing glyphs, or materially clipped. Do not build a deck-wide plan, classify page families, or create calibration jobs.
+
+### 2. Redraw directly
 
 ```bash
 EDITPPT="$(python3 scripts/ensure_editppt_runtime.py --print-path)"
-"$EDITPPT" doctor
+"$EDITPPT" image edit \
+  --image "output/direct-page-034/target.png" \
+  --image "output/direct-page-034/reference.png" \
+  --prompt-file "output/direct-page-034/image-edit-prompt.txt" \
+  --size 2560x1440 --quality high \
+  --out "output/direct-page-034/generated.png"
 ```
 
-Stop if the CLI, image backend, renderer, or required conversion runtime is unavailable.
+Inspect `generated.png` once. It must retain target content while adopting the reference visual language. Retry only this image-edit command when it is visibly wrong.
 
-### 2. Prepare the visual run
-
-Create a new run directory and inspect inputs:
+### 3. Rebuild editable PPT
 
 ```bash
-python3 scripts/prepare_visual_run.py \
-  --target "path/to/target.pptx" \
-  --reference "path/to/reference.pptx" \
-  --run-dir "path/to/run"
+"$EDITPPT" prepare "output/direct-page-034/generated.png" \
+  --job-dir "output/direct-page-034/reconstruction"
+"$EDITPPT" run next "output/direct-page-034/reconstruction"
 ```
 
-This writes source/reference ledgers, render directories, and `run.json`. Inspect at least one rendered target and reference page before paid generation. Stop on missing glyphs, substituted blank text, or clipped content. The source ledger is the content truth source; never replace it with OCR or generated text.
+The one-page run returns `rebuild_page_locally`. Generate its prompt with `reconstruction/scripts/build-page-worker-prompt.py`, claim it with `run dispatch --local`, then follow that bundled page-worker contract. Use local `builtin-ink` hints by default; do not ask for an OCR token.
 
-For a representative-page trial, add a selection such as `--slides "1,5,10,47"`. Rendering may still normalize the full source deck, but planning, generation, reconstruction, and validation remain limited to the selected pages.
+Before building the editable page, read the direct run's `source-ledger.json`; it is the text and critical-number authority when generated text is imperfect.
 
-### 3. Match target pages to reference pages
-
-Build the page-family plan:
+Build, contact-sheet, and validate the page. Record it, then finalize:
 
 ```bash
-python3 scripts/build_visual_plan.py --run-dir "path/to/run"
+"$EDITPPT" run record "output/direct-page-034/reconstruction" --page page_001 --agent-id main
+"$EDITPPT" run finalize "output/direct-page-034/reconstruction"
 ```
 
-Treat the first supplied reference as the primary reference deck. Reuse one canonical reference anchor for every target page in the same family. Do not select later reference decks automatically; enable fallback decks or add page overrides only when the user explicitly accepts the exception.
+## Delivery
 
-Review `visual-plan.json` before paid image generation. Stop if `style_lock` is missing, automatic pages mix reference decks, or one page family uses multiple automatic anchors.
-
-### 4. Create and run image-edit jobs
-
-Create prompts and provenance records without network calls:
-
-```bash
-python3 scripts/build_image_jobs.py --run-dir "path/to/run"
-```
-
-Generate direct pages for one-page families and only the first calibration page for every multi-page family:
-
-```bash
-python3 scripts/build_image_jobs.py \
-  --run-dir "path/to/run" \
-  --execute-phase calibration
-```
-
-Review every calibration page at full size. A one-page family is generated directly and needs no calibration approval. For every multi-page family, approve only when its title placement, margins, footer, palette, decorative language, density, and recurring chrome can govern the rest of that family. Record the approval and immutable hashes:
-
-```bash
-python3 scripts/build_image_jobs.py \
-  --run-dir "path/to/run" \
-  --approve-calibration
-```
-
-This writes `calibration-approved.json`. Then generate the remaining pages:
-
-```bash
-python3 scripts/build_image_jobs.py \
-  --run-dir "path/to/run" \
-  --execute-phase scale
-```
-
-Calibration jobs must call `editppt image edit` with the target slide first and the locked family reference anchor second. Scale jobs must pass the target slide followed by the approved generated calibration page; do not resend the original reference page. Retry only failed pages.
-
-### 5. Validate generated pages
-
-Run:
-
-```bash
-python3 scripts/validate_visual_run.py --run-dir "path/to/run" --stage generated
-```
-
-Do not reconstruct while generated pages or provenance records are incomplete. Validation must reject mixed automatic reference decks, multiple automatic anchors in one family, unapproved scale jobs, and calibration images changed after approval.
-
-### 6. Reconstruct editable slides
-
-Use the bundled reconstruction runtime. Start it with:
-
-If no PaddleOCR token is configured, continue with the local `builtin-ink` text-hints backend without stopping or asking the user. This workflow-specific rule overrides the dependency Skill's optional token prompt. Treat the source ledger and generated slide as the content authority; OCR is only an optional geometry aid in this workflow.
-
-```bash
-EDITPPT="$(python3 scripts/ensure_editppt_runtime.py --print-path)"
-"$EDITPPT" prepare "path/to/run/generated"/*.png \
-  --job-dir "path/to/run/reconstruction"
-"$EDITPPT" run next "path/to/run/reconstruction"
-```
-
-Generate worker prompts with `reconstruction/scripts/build-page-worker-prompt.py`, then follow its bundled page-worker contract for dispatch, record, and retry. For a single-page run, claim it with `--local` and rebuild it locally; multi-page runs require page workers. Finalize only after every page is recorded:
-
-```bash
-"$EDITPPT" run finalize "path/to/run/reconstruction"
-```
-
-Do not substitute a separate reconstruction Skill or a custom page builder for this bundled runtime.
-
-### 7. Validate and deliver
-
-Validate the final editable deck against the original source ledger:
-
-```bash
-python3 scripts/validate_visual_run.py \
-  --run-dir "path/to/run" \
-  --stage final \
-  --final-pptx "path/to/final.pptx" \
-  --reconstruction-validation "path/to/reconstruction/final/validation.json"
-```
-
-Render and inspect every final slide at full size. The final validator must compare each reconstruction `preview.png` with its generated source image and reject editable preview visual drift; an `editppt` structural pass alone is insufficient. Deliver only when `validation.json` has `passed: true`.
-
-## Stop conditions
-
-- Target or reference inputs are missing, invalid, or temporary lock files.
-- Rendered target or reference pages contain missing glyphs, blank substituted text, or clipped source content.
-- A target page has no credible reference-family match.
-- `visual-plan.json` has no primary deck lock, contains mixed automatic reference decks, or assigns multiple automatic anchors to one page family.
-- Scale jobs exist without `calibration-approved.json`, or an approved calibration hash no longer matches the generated calibration page.
-- Generated pages change chart meaning, omit registered content, or contain unresolved text drift.
-- Any page lacks its target, reference, prompt, output, or hash provenance.
-- Reconstruction validation fails or produces an image-only deck.
-- Required source text or critical numeric tokens cannot be reconciled.
+Deliver only the final editable PPTX after its page validation passes and its preview remains visually faithful to `generated.png`. State the target/reference slides and any unresolved visual warning plainly.

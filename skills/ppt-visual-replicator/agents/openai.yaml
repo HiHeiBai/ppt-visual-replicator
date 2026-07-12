@@ -1,4 +1,4 @@
 interface:
   display_name: "PPT Visual Replicator"
   short_description: "Rebuild a target PPT in a reference visual style"
-  default_prompt: "Use $ppt-visual-replicator to redraw this target PPTX in the supplied reference style and return an editable PPTX."
+  default_prompt: "Use $ppt-visual-replicator to redraw my selected target PPT slide in the supplied reference slide's style and return an editable PPTX."

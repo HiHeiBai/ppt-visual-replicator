@@ -13,32 +13,29 @@ class SkillPackageTest(unittest.TestCase):
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("name: ppt-visual-replicator", text)
-        self.assertIn("target-content PPTX", text)
-        self.assertIn("reference-style PPTX", text)
-        self.assertIn("editppt image edit", text)
+        self.assertIn("Target PPTX and target slide number", text)
+        self.assertIn("Reference-style PPTX", text)
+        self.assertIn('"$EDITPPT" image edit', text)
         self.assertIn('"$EDITPPT" prepare', text)
         self.assertIn('"$EDITPPT" run finalize', text)
         self.assertIn("Do not rewrite", text)
 
         for reference in (
             "references/content-protection.md",
-            "references/page-matching.md",
-            "references/image-prompt-contract.md",
             "references/acceptance.md",
         ):
             self.assertIn(reference, text)
             self.assertTrue((SKILL / reference).is_file(), reference)
 
-    def test_skill_requires_primary_deck_lock_and_calibration_gate(self) -> None:
+    def test_skill_uses_a_direct_selected_page_workflow(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("primary reference deck", text)
-        self.assertIn("--execute-phase calibration", text)
-        self.assertIn("--approve-calibration", text)
-        self.assertIn("--execute-phase scale", text)
-        self.assertIn("calibration-approved.json", text)
-        self.assertIn("--stage generated", text)
-        self.assertIn("mixed automatic reference decks", text)
+        self.assertIn("scripts/prepare_direct_page.py", text)
+        self.assertIn("--target-slide", text)
+        self.assertIn("--reference-slide", text)
+        self.assertNotIn("build_visual_plan.py", text)
+        self.assertNotIn("--execute-phase calibration", text)
+        self.assertNotIn("--approve-calibration", text)
 
     def test_skill_documents_glyph_preflight(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
@@ -49,7 +46,7 @@ class SkillPackageTest(unittest.TestCase):
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("`builtin-ink`", text)
-        self.assertIn("without stopping or asking the user", text)
+        self.assertIn("do not ask for an OCR token", text)
 
     def test_skill_vendors_its_editable_ppt_runtime_and_worker_contract(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
@@ -85,25 +82,12 @@ class SkillPackageTest(unittest.TestCase):
         self.assertEqual(Path(payload["install_command"][0]).name, "uv")
         self.assertEqual(payload["install_command"][1:3], ["tool", "install"])
 
-    def test_acceptance_requires_deck_and_calibration_consistency(self) -> None:
+    def test_acceptance_requires_direct_image_and_editable_ppt_consistency(self) -> None:
         text = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")
 
-        self.assertIn("one automatic reference deck", text)
-        self.assertIn("one automatic reference anchor per page family", text)
-        self.assertIn("calibration-approved.json", text)
-        self.assertIn("approved calibration hash", text)
-        self.assertIn("reference-copy drift", text)
-        self.assertIn("editable preview visual drift", text)
-
-    def test_page_matching_separates_single_image_content(self) -> None:
-        text = (SKILL / "references" / "page-matching.md").read_text(encoding="utf-8")
-
-        self.assertIn("`image_content`", text)
-
-    def test_scale_prompt_uses_target_and_calibration_only(self) -> None:
-        text = (SKILL / "references" / "image-prompt-contract.md").read_text(encoding="utf-8")
-
-        self.assertIn("Do not send the original reference page again", text)
+        self.assertIn("target and reference", text)
+        self.assertIn("generated slide", text)
+        self.assertIn("editable preview", text)
 
     def test_openai_metadata_matches_skill(self) -> None:
         text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PPT Visual Replicator"
+  short_description: "Quickly redraw a PPTX as an editable presentation"
+  default_prompt: "Use $ppt-visual-replicator in balanced mode to redraw this target PPTX, reuse duplicate pages and shared assets, and return an editable PPTX; style references are optional."

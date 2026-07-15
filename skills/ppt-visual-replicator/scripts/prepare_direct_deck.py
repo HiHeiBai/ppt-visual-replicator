@@ -67,6 +67,8 @@ def _request_contract(
     source_dpi: int,
     strict_text_protection: bool,
     speed_profile: str,
+    full_page_imagegen: bool,
+    style_contract: str | Path | None,
 ) -> dict[str, Any]:
     reference_images = _as_reference_images(reference_image)
     reference_slides = _as_reference_slides(reference_slide)
@@ -92,14 +94,31 @@ def _request_contract(
         "style_brief": style_brief.strip() if style_brief else None,
         "strict_text_protection": bool(strict_text_protection),
         "speed_profile": speed_profile,
+        "full_page_imagegen": bool(full_page_imagegen),
+        "style_contract": None,
         "references": reference_inputs,
     }
+    if style_contract is not None:
+        path = Path(style_contract).expanduser().resolve()
+        if not path.is_file():
+            raise DirectDeckError(f"style contract must be a readable JSON file: {path}")
+        try:
+            style_value = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise DirectDeckError(f"style contract is not valid JSON: {path}") from exc
+        if not isinstance(style_value, dict) or not style_value.get("name"):
+            raise DirectDeckError("style contract must be a JSON object with a non-empty name")
+        contract["style_contract"] = {"path": str(path), "sha256": _sha256(path), "name": style_value["name"]}
     contract["fingerprint"] = _stable_digest(contract)
     return contract
 
 
-def _generation_route(slide: dict[str, Any], speed_profile: str) -> tuple[str, str]:
+def _generation_route(
+    slide: dict[str, Any], speed_profile: str, full_page_imagegen: bool
+) -> tuple[str, str]:
     family = str(slide.get("family_hint") or "unknown")
+    if full_page_imagegen:
+        return "generate", "full-page imagegen is required for every unique page"
     if speed_profile == "strict":
         return "generate", "strict profile redraws every unique page"
     if speed_profile == "fast":
@@ -121,6 +140,7 @@ def _build_generation_plan(
     *,
     speed_profile: str,
     style_fingerprint: str,
+    full_page_imagegen: bool,
 ) -> dict[str, Any]:
     slide_by_number = {int(item["slide_number"]): item for item in ledger["slides"]}
     canonical_by_hash: dict[str, int] = {}
@@ -134,7 +154,7 @@ def _build_generation_plan(
         canonical_slide = canonical_by_hash.get(source_sha256)
         if canonical_slide is None:
             canonical_by_hash[source_sha256] = slide_number
-            action, reason = _generation_route(slide, speed_profile)
+            action, reason = _generation_route(slide, speed_profile, full_page_imagegen)
             reconstruction_action = "rebuild"
         else:
             action = "reuse"
@@ -259,6 +279,8 @@ def prepare_direct_deck(
     source_dpi: int = 192,
     strict_text_protection: bool = False,
     speed_profile: str = "balanced",
+    full_page_imagegen: bool = False,
+    style_contract: str | Path | None = None,
     resume: bool = False,
     renderer: Callable[..., dict[str, Any]] = render_pptx_to_pngs,
 ) -> dict[str, Any]:
@@ -279,6 +301,8 @@ def prepare_direct_deck(
         source_dpi=source_dpi,
         strict_text_protection=strict_text_protection,
         speed_profile=speed_profile,
+        full_page_imagegen=full_page_imagegen,
+        style_contract=style_contract,
     )
     if destination.exists():
         if not resume:
@@ -290,7 +314,7 @@ def prepare_direct_deck(
         existing_fingerprint = (manifest.get("request_contract") or {}).get("fingerprint")
         if existing_fingerprint != request_contract["fingerprint"]:
             raise DirectDeckError(
-                "existing run does not match the target, references, style, DPI, text mode, or speed profile"
+                "existing run does not match the target, references, style contract/brief, DPI, text mode, or speed profile"
             )
         return _refresh_resume_status(destination, manifest)
 
@@ -303,6 +327,8 @@ def prepare_direct_deck(
             ledger=ledger,
         )
         _write_json(destination / "source-ledger.json", ledger)
+        if style_contract is not None:
+            shutil.copy2(Path(style_contract).expanduser().resolve(), destination / "style-contract.json")
         (destination / "shared-assets").mkdir(parents=True)
         _write_json(
             destination / "shared-assets" / "index.json",
@@ -324,6 +350,7 @@ def prepare_direct_deck(
                 reference_image=reference_image,
                 reference_slide=reference_slide,
                 style_brief=style_brief,
+                style_contract=style_contract,
                 strict_text_protection=strict_text_protection,
                 run_dir=page_dir,
             )
@@ -367,6 +394,7 @@ def prepare_direct_deck(
         page_runs,
         speed_profile=speed_profile,
         style_fingerprint=request_contract["fingerprint"],
+        full_page_imagegen=full_page_imagegen,
     )
     _write_json(destination / "generation-plan.json", generation_plan)
     manifest = {
@@ -379,6 +407,7 @@ def prepare_direct_deck(
         "speed_profile": speed_profile,
         "text_protection_mode": "strict-native" if strict_text_protection else "visual-ocr",
         "style_brief": style_brief.strip() if style_brief else None,
+        "style_contract": "style-contract.json" if style_contract is not None else None,
         "request_contract": request_contract,
         "source_ledger": "source-ledger.json",
         "source_render_dir": "source-pages",
@@ -402,6 +431,10 @@ def main() -> int:
     parser.add_argument("--reference-image", action="append")
     parser.add_argument("--reference-slide", action="append", type=int)
     parser.add_argument("--style-brief")
+    parser.add_argument(
+        "--style-contract",
+        help="Optional JSON file that locks deck-level colors, typography, and reference-content rules.",
+    )
     parser.add_argument("--source-dpi", type=int, default=192)
     parser.add_argument("--strict-text-protection", action="store_true")
     parser.add_argument(
@@ -409,6 +442,11 @@ def main() -> int:
         choices=SPEED_PROFILES,
         default="balanced",
         help="fast minimizes redraws, balanced redraws visual pages, strict redraws every unique page.",
+    )
+    parser.add_argument(
+        "--full-page-imagegen",
+        action="store_true",
+        help="Redraw every unique slide as one complete imagegen page.",
     )
     parser.add_argument(
         "--resume",
@@ -425,6 +463,8 @@ def main() -> int:
         source_dpi=args.source_dpi,
         strict_text_protection=args.strict_text_protection,
         speed_profile=args.speed_profile,
+        full_page_imagegen=args.full_page_imagegen,
+        style_contract=args.style_contract,
         resume=args.resume,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

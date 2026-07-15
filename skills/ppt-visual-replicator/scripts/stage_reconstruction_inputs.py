@@ -10,6 +10,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from validate_generation_delivery import validate_generation_delivery
+
 
 class StageInputsError(RuntimeError):
     pass
@@ -66,6 +68,12 @@ def stage_reconstruction_inputs(
     manifest_path = root / "deck-run.json"
     if not manifest_path.is_file():
         raise StageInputsError(f"deck-run.json does not exist: {manifest_path}")
+    generation_gate = validate_generation_delivery(root)
+    if generation_gate.get("passed") is not True:
+        details = "; ".join(generation_gate.get("errors", []))
+        raise StageInputsError(
+            "refusing reconstruction staging before full-page imagegen review passes: " + details
+        )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     pages = manifest.get("pages") or []
     if not pages:

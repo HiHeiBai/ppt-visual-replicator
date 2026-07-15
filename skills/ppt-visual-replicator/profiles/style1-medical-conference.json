@@ -1,0 +1,25 @@
+{
+  "schema": "ppt_visual_style_contract.v1",
+  "name": "style1-medical-conference",
+  "reference_content_firewall": true,
+  "palette": {
+    "cover_background": "#003399",
+    "primary_blue": "#003399",
+    "accent_cyan": "#20A7D8",
+    "light_panel_blue": "#EAF4FF",
+    "content_background": "#FFFFFF",
+    "content_text": "#182333",
+    "border_blue": "#93C5F5"
+  },
+  "page_rules": {
+    "cover": "Deep medical-blue background with a restrained cyan orbital or wave decoration; large clear title; no borrowed logo or wording.",
+    "content": "White background, #003399 title, #EAF4FF panels, #93C5F5 borders, and a low-opacity #20A7D8 lower-left wave. Do not introduce a dark or gray content-page background.",
+    "section": "White or very pale-blue content field with the same #003399 title system and #20A7D8 decorative wave; preserve source content density."
+  },
+  "rules": [
+    "Use these color roles exactly across every compatible page; do not choose a new blue, cyan, gray, or card fill per slide.",
+    "Reference images may provide only palette, typography character, spacing rhythm, borders, shadows, and non-semantic decoration.",
+    "Reference images must not contribute charts, pies, diagrams, tables, data panels, photos, icons, logos, text, or page layouts.",
+    "The source page alone defines every information-bearing visual object and its count."
+  ]
+}

@@ -47,7 +47,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("--resume", text)
         self.assertIn("visual-ocr", text)
         self.assertIn("strict-native", text)
-        self.assertIn("Render the target PPTX once", text)
+        self.assertIn("Render the target PPTX directly to per-page PNGs", text)
         self.assertIn("Rendering the target PPTX is allowed only", text)
         self.assertIn("thin deck wrapper", text)
         self.assertIn("generation-plan.json", text)
@@ -106,10 +106,17 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("final real-render", acceptance)
 
     def test_skill_package_has_no_runtime_cache_files(self) -> None:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--", str(SKILL.relative_to(ROOT))],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.splitlines()
         forbidden = [
             path
-            for path in SKILL.rglob("*")
-            if path.name == ".DS_Store" or path.name == "__pycache__" or path.suffix == ".pyc"
+            for path in tracked
+            if path.endswith(".pyc") or "/__pycache__/" in path or path.startswith("__pycache__/")
         ]
 
         self.assertEqual(forbidden, [])

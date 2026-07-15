@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from pptx_inspect import InputError, inspect_pptx
 from render_source_pages import SourceRenderError, render_pptx_to_pngs
@@ -72,6 +72,37 @@ def _content_spec(
     }
 
 
+def _load_style_contract(
+    value: str | Path | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Load a deck-level visual contract without allowing page-local drift."""
+
+    if value is None:
+        return {
+            "schema": "ppt_visual_style_contract.v1",
+            "name": "shared-style-lock",
+            "reference_content_firewall": True,
+            "rules": [
+                "Use the same palette, typography character, spacing rhythm, and decorative language on every page.",
+                "Reference pages may not contribute charts, tables, diagrams, data panels, icons, photos, or page layouts.",
+                "The source page is the only authority for content-bearing visual objects and their count.",
+            ],
+        }
+    if isinstance(value, Mapping):
+        contract = dict(value)
+    else:
+        path = Path(value).expanduser().resolve()
+        if not path.is_file():
+            raise DirectRunError(f"style contract does not exist: {path}")
+        try:
+            contract = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise DirectRunError(f"style contract is not valid JSON: {path}") from exc
+    if not isinstance(contract, dict) or not contract.get("name"):
+        raise DirectRunError("style contract must be a JSON object with a non-empty name")
+    return contract
+
+
 def _as_reference_images(
     value: str | Path | Sequence[str | Path] | None,
 ) -> list[str | Path]:
@@ -106,6 +137,7 @@ def _direct_prompt(
     reference_slides: list[int | None],
     content_spec: dict[str, Any],
     style_brief: str | None,
+    style_contract: dict[str, Any],
 ) -> str:
     strict_mode = content_spec["text_protection_mode"] == "strict-native"
     source_text = "\n".join(
@@ -115,6 +147,23 @@ def _direct_prompt(
     style_instructions = _reference_prompt(reference_slides)
     brief = style_brief.strip() if style_brief else ""
     brief_block = f"\nExplicit style brief: {brief}\n" if brief else ""
+    summary = content_spec["object_summary"]
+    source_visual_contract = "\n".join(
+        (
+            "Source visual inventory (authoritative, not an invitation to add objects):",
+            f"- pictures: {summary['picture_count']}",
+            f"- tables: {summary['table_count']}",
+            f"- charts: {summary['chart_count']}",
+            f"- graphic frames: {summary['graphic_frame_count']}",
+        )
+    )
+    chart_ban = ""
+    if not summary["chart_count"]:
+        chart_ban = (
+            " The source declares zero chart objects: do not add pie/donut/bar/line charts, "
+            "graphs, data panels, legends, axes, or percentage diagrams."
+        )
+    contract_json = json.dumps(style_contract, ensure_ascii=False, indent=2)
     if strict_mode:
         text_contract = f"""Use the source image plus the native PPTX ledger. The following native text must remain present and exact:
 {source_text}
@@ -129,11 +178,22 @@ The first image is the clean content source for target slide {target_slide}; it 
 {style_instructions}
 {brief_block}
 
+Deck-level style lock (apply it identically to every compatible page; do not sample a new palette per page):
+```json
+{contract_json}
+```
+
+Reference-content firewall: reference images control only palette, typography character, spacing rhythm, borders, shadows, and non-semantic decoration. They must never donate charts, pie/donut graphics, tables, cards, diagrams, data panels, photos, icons, logos, text, or page composition. The first image alone controls the page's information-bearing objects, their count, and their placement.
+
+{source_visual_contract}
+
 Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning.
 
-Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, or images. Keep all target text legible, but treat generated text as provisional because source text will be restored during editable reconstruction.
+Do not copy reference wording, facts, logos, page numbers, confidential codes, study data, or visual components. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, images, or content-bearing diagrams.{chart_ban} Keep all target text legible, but treat generated text as provisional because source text will be restored during editable reconstruction.
 
 {text_contract}
+
+Before returning, visually audit the slide: reject any newly invented chart or diagram, any content-bearing object borrowed from a reference image, or any color/typography outside the deck-level style lock.
 
 Return one complete slide image only. Do not add a mockup frame, perspective, hands, devices, or surrounding UI.
 """
@@ -150,6 +210,7 @@ def prepare_direct_page(
     reference_image: str | Path | Sequence[str | Path] | None = None,
     reference_slide: int | Sequence[int] | None = None,
     style_brief: str | None = None,
+    style_contract: str | Path | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     destination = Path(run_dir).expanduser().resolve()
     if destination.exists():
@@ -231,6 +292,7 @@ def prepare_direct_page(
         strict_text_protection=strict_text_protection,
     )
     clean_style_brief = style_brief.strip() if style_brief else ""
+    loaded_style_contract = _load_style_contract(style_contract)
     style_mode = "reference_set" if reference_inputs else ("brief" if clean_style_brief else "default")
     reference_files = [item["image"] for item in reference_inputs]
     manifest = {
@@ -240,6 +302,7 @@ def prepare_direct_page(
         "style_mode": style_mode,
         "text_protection_mode": content_spec["text_protection_mode"],
         "style_brief": clean_style_brief or None,
+        "style_contract": "style-contract.json",
         "reference_slide": reference_slides[0] if len(reference_slides) == 1 else None,
         "reference_slides": reference_slides,
         "source_image": "source-content.png",
@@ -263,9 +326,17 @@ def prepare_direct_page(
         },
     )
     _write_json(destination / "content-spec.json", content_spec)
+    _write_json(destination / "style-contract.json", loaded_style_contract)
     _write_json(destination / "run.json", manifest)
     (destination / "direct-image-prompt.txt").write_text(
-        _direct_prompt(target_slide, reference_slides, content_spec, clean_style_brief), encoding="utf-8"
+        _direct_prompt(
+            target_slide,
+            reference_slides,
+            content_spec,
+            clean_style_brief,
+            loaded_style_contract,
+        ),
+        encoding="utf-8",
     )
     return manifest
 
@@ -289,6 +360,10 @@ def main() -> int:
     parser.add_argument("--reference-image", action="append")
     parser.add_argument("--reference-slide", action="append", type=int)
     parser.add_argument("--style-brief")
+    parser.add_argument(
+        "--style-contract",
+        help="Optional JSON file that locks deck-level colors, typography, and reference-content rules.",
+    )
     parser.add_argument("--run-dir", required=True)
     args = parser.parse_args()
     manifest = prepare_direct_page(
@@ -301,6 +376,7 @@ def main() -> int:
         reference_image=args.reference_image,
         reference_slide=args.reference_slide,
         style_brief=args.style_brief,
+        style_contract=args.style_contract,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0

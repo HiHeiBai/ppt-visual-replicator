@@ -132,14 +132,10 @@ def main() -> int:
         print(
             "text-hints: no PaddleOCR token configured; falling back to the built-in offline "
             "detector (geometry only — it measures where text is and how large, but cannot read "
-            "it). A free PaddleOCR-VL token adds recognized text content and cleaner block "
-            "boundaries, noticeably improving text fidelity in the final PPT. The free personal quota "
-            "is currently more than enough for this skill, so applying is risk-free with no extra "
-            "cost. ASK THE USER once "
-            "before reconstructing pages: configure a token now (apply at "
-            "https://aistudio.baidu.com/account/accessToken, then `editppt config "
-            "--paddle-ocr-token <token>` and `editppt run hints <run>` to regenerate this run's "
-            "hints), or continue with the offline result. Respect their choice and do not ask again.",
+            "it). Continue with builtin-ink plus the original source ledger; missing OCR credentials "
+            "must not pause or skip editable reconstruction. A PaddleOCR-VL token can be configured "
+            "later (https://aistudio.baidu.com/account/accessToken, then `editppt config "
+            "--paddle-ocr-token <token>` and `editppt run hints <run>`) to improve recognition.",
             file=sys.stderr,
         )
     if token:

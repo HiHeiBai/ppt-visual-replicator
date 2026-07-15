@@ -1,3 +1,4 @@
+import hashlib
 import json
 import importlib.util
 import struct
@@ -70,6 +71,30 @@ def fake_renderer(pptx, out_dir, *, ledger, **_kwargs):
     }
     (destination / "render-report.json").write_text(json.dumps(report), encoding="utf-8")
     return report
+
+
+def record_accepted_generation_review(run_dir: Path, page: dict) -> None:
+    """Create the reviewer evidence required before imagegen output is staged."""
+    source = run_dir / page["source_image"]
+    generated = run_dir / page["generated_image"]
+    review = {
+        "schema": "ppt_visual_generation_review.v1",
+        "target_slide": page["target_slide"],
+        "accepted": True,
+        "generated_image": page["generated_image"],
+        "generated_image_sha256": hashlib.sha256(generated.read_bytes()).hexdigest(),
+        "source_image": page["source_image"],
+        "source_image_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "checks": {
+            "source_structure_match": True,
+            "no_invented_information_visuals": True,
+            "no_reference_content_transfer": True,
+            "style_contract_match": True,
+        },
+        "review_note": "Test reviewer confirmed source structure and style-only reference use.",
+    }
+    path = run_dir / page["run_dir"] / "generation-review.json"
+    path.write_text(json.dumps(review), encoding="utf-8")
 
 
 class SpeedProfileTest(unittest.TestCase):
@@ -157,6 +182,7 @@ class SpeedProfileTest(unittest.TestCase):
                     (root / "run" / page["generated_image"]).write_bytes(
                         f"generated-{page['target_slide']}".encode()
                     )
+                    record_accepted_generation_review(root / "run", page)
 
             report = stage_reconstruction_inputs(root / "run")
             self.assertEqual(report["page_count"], 4)

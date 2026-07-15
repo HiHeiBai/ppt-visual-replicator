@@ -115,6 +115,7 @@ class SpeedProfileTest(unittest.TestCase):
             manifest = prepare_direct_deck(
                 self.make_target(root),
                 root / "run",
+                force_reconstruct=True,
                 renderer=fake_renderer,
             )
 
@@ -134,6 +135,7 @@ class SpeedProfileTest(unittest.TestCase):
                 self.make_target(root),
                 root / "run",
                 speed_profile="strict",
+                force_reconstruct=True,
                 renderer=fake_renderer,
             )
 
@@ -145,7 +147,9 @@ class SpeedProfileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             target = self.make_target(root)
-            manifest = prepare_direct_deck(target, root / "run", renderer=fake_renderer)
+            manifest = prepare_direct_deck(
+                target, root / "run", force_reconstruct=True, renderer=fake_renderer
+            )
             for page in manifest["pages"]:
                 if page["generation"]["action"] == "generate":
                     output = root / "run" / page["generated_image"]
@@ -154,6 +158,7 @@ class SpeedProfileTest(unittest.TestCase):
             resumed = prepare_direct_deck(
                 target,
                 root / "run",
+                force_reconstruct=True,
                 renderer=fake_renderer,
                 resume=True,
             )
@@ -165,6 +170,7 @@ class SpeedProfileTest(unittest.TestCase):
                     target,
                     root / "run",
                     speed_profile="strict",
+                    force_reconstruct=True,
                     renderer=fake_renderer,
                     resume=True,
                 )
@@ -175,6 +181,7 @@ class SpeedProfileTest(unittest.TestCase):
             manifest = prepare_direct_deck(
                 self.make_target(root),
                 root / "run",
+                force_reconstruct=True,
                 renderer=fake_renderer,
             )
             for page in manifest["pages"]:
@@ -223,6 +230,7 @@ class SpeedProfileTest(unittest.TestCase):
             manifest = prepare_direct_deck(
                 self.make_target(root),
                 root / "run",
+                force_reconstruct=True,
                 renderer=fake_renderer,
             )
             reconstruction = root / "run" / "reconstruction"

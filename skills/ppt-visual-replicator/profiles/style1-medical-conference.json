@@ -11,6 +11,23 @@
     "content_text": "#182333",
     "border_blue": "#93C5F5"
   },
+  "title_system": {
+    "cover": {
+      "font": "微软雅黑",
+      "color": "#FFFFFF",
+      "bold": true
+    },
+    "content": {
+      "font": "微软雅黑",
+      "color": "#003399",
+      "bold": true
+    },
+    "section": {
+      "font": "微软雅黑",
+      "color": "#003399",
+      "bold": true
+    }
+  },
   "page_rules": {
     "cover": "Deep medical-blue background with a restrained cyan orbital or wave decoration; large clear title; no borrowed logo or wording.",
     "content": "White background, #003399 title, #EAF4FF panels, #93C5F5 borders, and a low-opacity #20A7D8 lower-left wave. Do not introduce a dark or gray content-page background.",

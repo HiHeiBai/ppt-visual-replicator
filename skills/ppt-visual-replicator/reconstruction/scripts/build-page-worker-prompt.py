@@ -83,6 +83,9 @@ def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
         "shared_assets_index": "none",
         "page_route": "strict page-local reconstruction",
         "canonical_page_dir": "none",
+        "title_style_sheet": "none",
+        "style_contract": "none",
+        "page_family": "content",
     }
     direct_run_path = run_dir.parent / "deck-run.json"
     if not direct_run_path.is_file():
@@ -116,6 +119,15 @@ def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
                 if reconstruction.get("action") == "reuse-canonical"
                 else "none"
             ),
+            "title_style_sheet": str(
+                (run_dir.parent / str(direct_run.get("title_styles") or "title-styles.json")).resolve()
+            ),
+            "style_contract": (
+                str((run_dir.parent / str(direct_run["style_contract"])).resolve())
+                if direct_run.get("style_contract")
+                else "none"
+            ),
+            "page_family": str(direct_page.get("family_hint") or "content"),
         }
     )
     return context
@@ -136,6 +148,9 @@ def build_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
         "{{SHARED_ASSETS_INDEX}}": workflow["shared_assets_index"],
         "{{PAGE_ROUTE}}": workflow["page_route"],
         "{{CANONICAL_PAGE_DIR}}": workflow["canonical_page_dir"],
+        "{{TITLE_STYLE_SHEET}}": workflow["title_style_sheet"],
+        "{{STYLE_CONTRACT}}": workflow["style_contract"],
+        "{{PAGE_FAMILY}}": workflow["page_family"],
         "{{SKILL_ROOT}}": str(SKILL_ROOT),
     }
     prompt = page_worker_template()

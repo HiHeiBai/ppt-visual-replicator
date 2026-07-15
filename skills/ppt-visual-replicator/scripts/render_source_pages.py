@@ -13,12 +13,18 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from pptx_inspect import InputError, inspect_pptx
 
 
 class SourceRenderError(RuntimeError):
     pass
+
+
+P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+NS = {"p": P_NS}
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -59,6 +65,35 @@ def _run(
         raise SourceRenderError(detail or f"renderer command failed: {command[0]}") from exc
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SourceRenderError(f"renderer command failed: {command[0]}: {exc}") from exc
+
+
+def _write_single_slide_pptx(source: Path, destination: Path, slide_number: int) -> None:
+    """Create a one-slide PPTX while retaining the original native objects."""
+
+    with ZipFile(source) as archive:
+        try:
+            presentation = ET.fromstring(archive.read("ppt/presentation.xml"))
+        except (KeyError, ET.ParseError) as exc:
+            raise SourceRenderError("PPTX has an unreadable presentation.xml") from exc
+        slide_list = presentation.find("p:sldIdLst", NS)
+        if slide_list is None:
+            raise SourceRenderError("PPTX has no slide relationship list")
+        slide_ids = list(slide_list)
+        if slide_number <= 0 or slide_number > len(slide_ids):
+            raise SourceRenderError(f"slide {slide_number} is outside the presentation")
+        selected = slide_ids[slide_number - 1]
+        for slide_id in slide_ids:
+            slide_list.remove(slide_id)
+        slide_list.append(selected)
+
+        with ZipFile(destination, "w", compression=ZIP_DEFLATED) as output:
+            for item in archive.infolist():
+                payload = (
+                    ET.tostring(presentation, encoding="utf-8", xml_declaration=True)
+                    if item.filename == "ppt/presentation.xml"
+                    else archive.read(item.filename)
+                )
+                output.writestr(item, payload)
 
 
 def render_pptx_to_pngs(

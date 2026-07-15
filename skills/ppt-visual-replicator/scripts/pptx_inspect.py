@@ -17,14 +17,34 @@ A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"p": P_NS, "a": A_NS, "r": R_NS, "rel": REL_NS}
+NUMBER_PATTERN = r"[-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+VALUE_PATTERN = rf"{NUMBER_PATTERN}\s*%?"
+STATISTIC_LABEL_PATTERN = (
+    r"(?:HR|CI|OR|RR|P|SD|SE|N|BETA|ALPHA|HGB|HB|WBC|PLT|ALT|AST|CRP|BMI|BP|EF|EGFR)"
+)
+UNIT_PATTERN = r"(?:个月|月|年|天|周|小时|分钟|min|h|mmHg|mg(?:/dL)?|kg|g|μg|ug|mL|L|cm|mm|例|人|次|倍|级|线)"
 CRITICAL_TOKEN_RE = re.compile(
-    r"(?:HR|CI|OR|RR|P)\s*[=<>≤≥]?\s*\d+(?:\.\d+)?%?|\d+(?:\.\d+)?%|\d+(?:\.\d+)?",
-    re.IGNORECASE,
+    rf"""
+    (?:(?:{NUMBER_PATTERN}\s*%\s*)?CI\s*(?:=|:)?\s*[\[(]?{VALUE_PATTERN}\s*(?:[-–—~]|至)\s*{VALUE_PATTERN}[\])]?|
+       \b{STATISTIC_LABEL_PATTERN}\s*(?:(?:=|:|<|>|≤|≥)\s*|\s+){VALUE_PATTERN}|
+       \b(?-i:[A-Z](?:[A-Z0-9-]{{1,9}}|[a-z][A-Z0-9][A-Za-z0-9-]{{0,7}}))\s*(?:=|:|<|>|≤|≥)\s*{VALUE_PATTERN}|
+       \b(?:HGB|HB|WBC|PLT|ALT|AST|CRP|BMI|BP|EF|EGFR)\s+{VALUE_PATTERN}|
+       {NUMBER_PATTERN}\s*/\s*{NUMBER_PATTERN}\s*级|
+       {NUMBER_PATTERN}\s*{UNIT_PATTERN}|
+       {NUMBER_PATTERN}\s*%|
+       {NUMBER_PATTERN})
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 
 class InputError(ValueError):
     pass
+
+
+def extract_critical_tokens(text: str) -> list[str]:
+    """Keep statistical expressions, ranges, units, and numeric values intact in ledgers."""
+    return sorted({match.group(0).strip() for match in CRITICAL_TOKEN_RE.finditer(text)})
 
 
 def _sha256(path: Path) -> str:
@@ -53,8 +73,10 @@ def _slide_family(
         return "cover"
     if table_count:
         return "table"
-    if chart_count or picture_count >= 2:
-        return "chart_figure"
+    if chart_count:
+        return "chart"
+    if picture_count >= 2:
+        return "multi_image"
     if any(marker in joined for marker in ("结论", "总结", "conclusion", "summary")):
         return "conclusion"
     if picture_count == 1:
@@ -134,7 +156,7 @@ def inspect_pptx(path: str | Path) -> dict[str, Any]:
                         "table_count": table_count,
                         "chart_count": chart_count,
                         "graphic_frame_count": len(graphic_frames),
-                        "critical_tokens": sorted(set(CRITICAL_TOKEN_RE.findall(joined))),
+                        "critical_tokens": extract_critical_tokens(joined),
                         "family_hint": _slide_family(
                             index,
                             len(slide_paths),

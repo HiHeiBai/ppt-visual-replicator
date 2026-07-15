@@ -6,7 +6,9 @@ from pathlib import Path
 
 ACTIVE_PAGE_STATUSES = {"dispatched"}
 DISPATCHABLE_PAGE_STATUSES = {"pending"}
-DEFAULT_MAX_CONCURRENT_PAGES = 6
+# Keep one slot for the coordinator in Codex desktop's four-slot runtime.
+# Callers with a larger worker pool can still override this at prepare time.
+DEFAULT_MAX_CONCURRENT_PAGES = 3
 
 
 def now_iso():

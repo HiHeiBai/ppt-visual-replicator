@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import importlib.util
 import sys
 import stat
+import tempfile
 from pathlib import Path
 
 
@@ -65,7 +67,7 @@ def read_config_file(path):
 
 
 def write_config_file(path, values):
-    path = Path(path)
+    path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         import yaml
@@ -74,17 +76,57 @@ def write_config_file(path, values):
             f"PyYAML is required to write editppt config. Reinstall with {cli_reinstall_hint()}."
         ) from exc
     data = {key: values[key] for key in ENV_FIELDS if values.get(key)}
+    temp_name = None
+    fd = None
     try:
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            text=True,
+        )
+        os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = None
             yaml.safe_dump(data, handle, allow_unicode=True, sort_keys=True)
-    except OSError:
-        with path.open("w", encoding="utf-8") as handle:
-            yaml.safe_dump(data, handle, allow_unicode=True, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+        temp_name = None
+    except OSError as exc:
+        raise SystemExit(f"Cannot safely write editppt config: {path}: {exc}") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if temp_name:
+            Path(temp_name).unlink(missing_ok=True)
+
+
+@contextmanager
+def config_write_lock(path):
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f".{path.name}.lock")
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
         try:
-            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except ImportError:
             pass
+        yield
+    finally:
+        try:
+            try:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except ImportError:
+                pass
+        finally:
+            os.close(fd)
 
 
 def mask_secret(value):
@@ -122,7 +164,7 @@ def import_codex_ppt_values(values):
     return changed, codex_ppt_env
 
 
-def config(args):
+def _config_locked(args):
     home = runtime_home()
     values = read_config_file(config_path(home))
     before = dict(values)
@@ -130,16 +172,22 @@ def config(args):
     import_path = None
     if args.import_codex_ppt:
         imported, import_path = import_codex_ppt_values(values)
-    if args.api_key:
-        values["OPENAI_API_KEY"] = args.api_key
+    if getattr(args, "api_key_from_env", False):
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise SystemExit("OPENAI_API_KEY is not set; refuse to accept API keys through command-line arguments")
+        values["OPENAI_API_KEY"] = api_key
     if args.base_url is not None:
         values["OPENAI_BASE_URL"] = args.base_url.strip()
     if args.clear_base_url:
         values.pop("OPENAI_BASE_URL", None)
     if args.model is not None:
         values["IMAGE_TO_EDITABLE_PPT_IMAGE_MODEL"] = args.model.strip()
-    if getattr(args, "paddle_ocr_token", None):
-        values["PADDLE_OCR_TOKEN"] = args.paddle_ocr_token.strip()
+    if getattr(args, "paddle_ocr_token_from_env", False):
+        paddle_token = os.environ.get("PADDLE_OCR_TOKEN", "").strip()
+        if not paddle_token:
+            raise SystemExit("PADDLE_OCR_TOKEN is not set; refuse to accept OCR tokens through command-line arguments")
+        values["PADDLE_OCR_TOKEN"] = paddle_token
     changed = sorted(key for key in ENV_FIELDS if before.get(key) != values.get(key))
     if changed or not config_path(home).exists():
         write_config_file(config_path(home), values)
@@ -159,6 +207,11 @@ def config(args):
             value = mask_secret(value)
         print(f"{key}={value or '<unset>'}")
     return 0
+
+
+def config(args):
+    with config_write_lock(config_path(runtime_home())):
+        return _config_locked(args)
 
 
 def current_python_has_module(module):
@@ -215,7 +268,7 @@ def collect_status(check_api=False):
             "selection": "paddleocr-vl" if values.get("PADDLE_OCR_TOKEN") else "builtin-ink",
             "paddle_token": "set" if values.get("PADDLE_OCR_TOKEN") else "unset",
             "apply_url": PADDLE_TOKEN_APPLY_URL,
-            "configure_command": "editppt config --paddle-ocr-token <token>",
+            "configure_command": "PADDLE_OCR_TOKEN=... editppt config --paddle-ocr-token-from-env",
         },
         "network_approval": {
             "commands": [
@@ -233,7 +286,7 @@ def collect_status(check_api=False):
             ),
         },
         "next": "no action needed" if ok else (
-            "run `codex login` or `editppt config --api-key <key>`" if check_api and not image_backend_ready
+            "run `codex login` or `OPENAI_API_KEY=... editppt config --api-key-from-env`" if check_api and not image_backend_ready
             else cli_reinstall_hint().strip("`")
         ),
     }
@@ -301,11 +354,11 @@ def main():
     doc.add_argument("--timeout", type=int, default=30, help="Reserved timeout value for future network probes.")
     doc.set_defaults(func=doctor)
     cfg = sub.add_parser("config", help="Write or update ~/.editppt/config.yaml")
-    cfg.add_argument("--api-key", help="OpenAI or OpenAI-compatible API key to store.")
+    cfg.add_argument("--api-key-from-env", action="store_true", help="Store OPENAI_API_KEY from the environment without exposing it in process arguments.")
     cfg.add_argument("--base-url", help="OpenAI-compatible base URL, for example https://api.openai.com/v1.")
     cfg.add_argument("--clear-base-url", action="store_true", help="Remove OPENAI_BASE_URL from the config file.")
     cfg.add_argument("--model", help="Default image model for API fallback.")
-    cfg.add_argument("--paddle-ocr-token", help=f"PaddleOCR-VL token for content-aware text hints. Apply at {PADDLE_TOKEN_APPLY_URL}.")
+    cfg.add_argument("--paddle-ocr-token-from-env", action="store_true", help=f"Store PADDLE_OCR_TOKEN from the environment. Apply at {PADDLE_TOKEN_APPLY_URL}.")
     cfg.add_argument("--import-codex-ppt", action="store_true", help="Import compatible values from ~/.codex-ppt-skill/.env when present.")
     cfg.set_defaults(func=config)
     args = parser.parse_args()

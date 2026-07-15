@@ -10,22 +10,77 @@ import site
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 BUNDLED_CLI = SKILL_ROOT / "reconstruction" / "cli"
+RUNTIME_INFO_SCHEMA = "editppt.runtime-info.v1"
+PACKAGE_NAME = "image-to-editable-ppt-cli"
+
+
+def command_candidates() -> list[Path]:
+    """Return every local editppt entrypoint that could be the bundled runtime."""
+    candidates: list[Path] = []
+    command = shutil.which("editppt")
+    if command:
+        candidates.append(Path(command).resolve())
+    scripts_dir = Path(site.getuserbase()) / ("Scripts" if sys.platform == "win32" else "bin")
+    executable = scripts_dir / ("editppt.exe" if sys.platform == "win32" else "editppt")
+    if executable.is_file():
+        candidates.append(executable.resolve())
+    return list(dict.fromkeys(candidates))
+
+
+def runtime_info(command: Path) -> dict[str, Any] | None:
+    """Read the machine-readable provenance reported by one editppt executable."""
+    try:
+        result = subprocess.run(
+            [str(command), "runtime-info", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def is_bundled_runtime(command: Path) -> bool:
+    """Accept only an entrypoint that proves it is loading this skill's CLI source."""
+    payload = runtime_info(command)
+    source_root = payload.get("source_root") if payload else None
+    if not isinstance(source_root, str):
+        return False
+    try:
+        actual_source_root = Path(source_root).expanduser().resolve()
+    except OSError:
+        return False
+    return (
+        payload.get("schema") == RUNTIME_INFO_SCHEMA
+        and payload.get("package") == PACKAGE_NAME
+        and actual_source_root == BUNDLED_CLI.resolve()
+    )
 
 
 def installed_command() -> Path | None:
-    command = shutil.which("editppt")
-    if command:
-        return Path(command).resolve()
-    scripts_dir = Path(site.getuserbase()) / ("Scripts" if sys.platform == "win32" else "bin")
-    executable = scripts_dir / ("editppt.exe" if sys.platform == "win32" else "editppt")
-    return executable if executable.is_file() else None
+    for command in command_candidates():
+        if is_bundled_runtime(command):
+            return command
+    return None
 
 
 def installer_command() -> list[str]:
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "tool", "install", "--force", "--editable", str(BUNDLED_CLI)]
     if sys.version_info >= (3, 10):
         return [
             sys.executable,
@@ -34,11 +89,9 @@ def installer_command() -> list[str]:
             "install",
             "--user",
             "--upgrade",
+            "--editable",
             str(BUNDLED_CLI),
         ]
-    uv = shutil.which("uv")
-    if uv:
-        return [uv, "tool", "install", "--force", "--editable", str(BUNDLED_CLI)]
     for executable_name in ("python3.13", "python3.12", "python3.11", "python3.10"):
         executable = shutil.which(executable_name)
         if executable:
@@ -49,6 +102,7 @@ def installer_command() -> list[str]:
                 "install",
                 "--user",
                 "--upgrade",
+                "--editable",
                 str(BUNDLED_CLI),
             ]
     raise RuntimeError(
@@ -60,7 +114,10 @@ def install_bundled_runtime() -> Path:
     subprocess.run(installer_command(), check=True)
     command = installed_command()
     if not command:
-        raise RuntimeError("Bundled editppt installation completed but the executable was not found")
+        raise RuntimeError(
+            "Bundled editppt installation completed, but no executable proved it is loading "
+            f"{BUNDLED_CLI}. Ensure the installer location is on PATH and retry."
+        )
     return command
 
 
@@ -92,6 +149,7 @@ def main() -> int:
                 "action": action,
                 "bundled_cli": str(BUNDLED_CLI),
                 "editppt": str(command) if command else None,
+                "runtime_verified": bool(command),
                 "install_command": installer_command(),
             },
             ensure_ascii=False,

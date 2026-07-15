@@ -4,6 +4,7 @@ import html
 import json
 import math
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -630,6 +631,8 @@ def slide_size_type(width, height):
 
 
 def presentation_xml(slide_count, width, height):
+    # 256 is the reserved start of the normal PowerPoint slide-id range; the
+    # first generated id is therefore 257 while rId values remain one-based.
     slide_ids = "".join(f'<p:sldId id="{255 + i}" r:id="rId{i + 1}"/>' for i in range(1, slide_count + 1))
     size_type = slide_size_type(width, height)
     return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -783,10 +786,8 @@ def render_preview(manifest, manifest_path, out_path):
     def open_preview_image(src):
         if src.suffix.lower() != ".svg":
             return Image.open(src).convert("RGBA")
-        convert = "/opt/homebrew/bin/magick"
-        if not Path(convert).exists():
-            convert = "/opt/homebrew/bin/convert"
-        if not Path(convert).exists():
+        convert = shutil.which("magick") or shutil.which("convert")
+        if not convert:
             print(f"Warning: cannot preview SVG without ImageMagick: {src}", file=sys.stderr)
             return None
         with tempfile.NamedTemporaryFile(suffix=".png") as handle:
@@ -921,9 +922,25 @@ def choose_preview_font(preferred):
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
     ]
     for candidate in candidates:
         if candidate and Path(candidate).exists():
+            return candidate
+    fc_match = shutil.which("fc-match")
+    if fc_match:
+        result = subprocess.run(
+            [fc_match, "-f", "%{file}", "Noto Sans CJK SC"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        candidate = result.stdout.strip()
+        if result.returncode == 0 and candidate and Path(candidate).is_file():
             return candidate
     return None
 

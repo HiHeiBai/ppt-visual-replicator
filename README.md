@@ -2,51 +2,75 @@
 
 [简体中文](README.zh-CN.md)
 
-An agent skill that redraws PowerPoint slides in a coherent visual style and rebuilds them as an editable `.pptx` without rewriting the original content.
+Turn an existing PowerPoint deck into a visually renewed, genuinely editable `.pptx` — without changing what the deck says.
 
-## Highlights
+`PPTX → clean source pages → imagegen redraw → per-page review → editable PPTX`
 
-- Accepts a `.pptx` as the only required input and renders its slides to PNG automatically.
-- Supports an optional style brief or a small shared set of reference images.
-- Uses visual OCR by default, with strict native-text protection for number-sensitive decks.
-- Rebuilds titles, body text, cards, tables, arrows, and structural elements as editable PowerPoint objects.
-- Preserves screenshots, photos, charts, and complex illustrations as positioned image regions when appropriate.
-- Detects exact duplicate slides, reuses deck-level assets, and supports resumable runs.
-- Bundles the `editppt` reconstruction runtime.
+This is a content-preserving reconstruction skill for Codex. It uses the original slide as the sole authority for copy, data, charts, citations, logos, and page order. Optional reference images contribute style only.
 
-## Speed profiles
+## What you receive
 
-| Profile | Behavior | Best for |
-| --- | --- | --- |
-| `balanced` | Redraws covers and visual concept pages; directly rebuilds screenshot-led pages | Default, recommended |
-| `fast` | Minimizes whole-slide generation and preserves more complex regions as images | Tutorial and screenshot-heavy decks |
-| `strict` | Redraws every unique page and applies full per-page asset separation | Maximum object-level editability |
+- A fresh, coherent visual treatment across the deck.
+- Native editable PowerPoint text and structural objects in the final `.pptx`.
+- Screenshots, photos, charts, and intricate illustrations retained as independent image regions only when breaking them apart would not make them more useful to edit.
+- A page-by-page review trail, bound to source and generated-image hashes, plus delivery gates that reject unreviewed, changed, or screenshot-only output.
+
+The output is not a screenshot pasted into PowerPoint with text over it.
+
+## Built to protect content
+
+The workflow separates content from style:
+
+| Comes from the source deck | May come from a user-supplied style reference |
+| --- | --- |
+| Wording, numbers, tables, charts, citations, logos, and reading order | Palette, typography character, spacing, borders, shadows, and decoration |
+
+For medical, financial, legal, scientific, or number-dense material, strict text protection keeps the native source text and critical values as the reconstruction authority.
 
 ## Install
-
-Install globally with the Skills CLI:
 
 ```bash
 npx skills add Moxi-Lab/ppt-visual-replicator \
   --skill ppt-visual-replicator --global --yes
 ```
 
-Or clone and copy the skill manually:
+Or copy `skills/ppt-visual-replicator` from a clone into `~/.codex/skills/`, then start a new Codex task so the skill catalog refreshes.
 
-```bash
-git clone https://github.com/Moxi-Lab/ppt-visual-replicator.git
-mkdir -p ~/.codex/skills
-cp -R ppt-visual-replicator/skills/ppt-visual-replicator ~/.codex/skills/
+## Use it
+
+Attach or point Codex to a `.pptx`, then ask:
+
+```text
+Use $ppt-visual-replicator to recreate this deck as an editable PPTX.
+Preserve every source claim, number, chart, citation, logo, and page order.
 ```
 
-Start a new Codex task after installation so the skill catalog refreshes.
+You may also provide:
 
-## Requirements
+- A single slide number instead of a full deck.
+- A concise style brief.
+- One or more user-supplied reference-style PNGs.
+- A request for strict text protection.
+
+Do not use a reference deck or image as a source of facts, wording, charts, logos, or layouts.
+
+## What happens during a run
+
+1. Render the requested slides and validate the source PNGs.
+2. Redraw each required page with built-in image generation.
+3. Review each generated page immediately and save a hash-bound checkpoint.
+4. Run the generation gate before reconstruction.
+5. Rebuild the approved pages locally as editable PowerPoint objects.
+6. Validate editability, then render the final deck for visual QA.
+
+Each page has its own state and review evidence. If a run is interrupted, continue from the recorded checkpoint; do not regenerate pages that have already passed review.
+
+## Local requirements
 
 - Python 3.10+
 - LibreOffice (`soffice` or `libreoffice`)
 - Poppler (`pdftoppm`)
-- A Codex environment with built-in image generation and an image backend available to `editppt`
+- A Codex environment with built-in image generation
 
 macOS:
 
@@ -61,43 +85,14 @@ Ubuntu/Debian:
 sudo apt-get install libreoffice poppler-utils
 ```
 
-The bundled editable-PPT runtime is installed automatically when first needed.
+The bundled `editppt` runtime is installed automatically when first required and verifies that it is using this skill's own source before reuse.
 
-## Usage
-
-In Codex, attach or point to a PowerPoint file and ask:
-
-```text
-Use $ppt-visual-replicator in balanced mode to redraw this PPTX and return an editable PPTX.
-```
-
-Optional inputs include:
-
-- `fast`, `balanced`, or `strict` speed profile
-- A target slide number for a one-page run
-- A style brief
-- One or a few deck-level reference-style PNGs
-- Strict native-text protection
-
-## Workflow
-
-```text
-PPTX -> rendered source PNGs -> generation plan
-     -> selective visual redraw -> editable reconstruction
-     -> validation -> final real-render QA -> editable PPTX
-```
-
-Exact duplicate rendered pages are processed once. Repeated logos, mascots, decorative elements, and recurring chrome can be stored in a shared deck asset index and reused across pages.
-
-## Development
-
-Run the test suite:
+## Verify a development checkout
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests -v
+python3 /path/to/skill-creator/scripts/quick_validate.py skills/ppt-visual-replicator
 ```
-
-Validate the skill package with the `quick_validate.py` script from OpenAI's `skill-creator` skill when available.
 
 ## License
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Deprecated compatibility planner; direct-deck runs use generation-plan.json instead."""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-STRICT_FAMILIES = {"cover", "table", "chart_figure"}
+STRICT_FAMILIES = {"cover", "table", "chart"}
 
 
 class PlanError(ValueError):

@@ -2,51 +2,73 @@
 
 [English](README.md)
 
-一个用于 PowerPoint 视觉重绘与可编辑重建的 Agent Skill。在不改写原始内容的前提下，统一整套演示文稿的视觉风格，并输出可编辑的 `.pptx`。
+把已有 PPT 重做成视觉统一、真正可编辑的 `.pptx`，同时不改变它表达的任何内容。
 
-## 主要能力
+`PPTX → 干净的原始页 → imagegen 重绘 → 逐页审核 → 可编辑 PPTX`
 
-- 只需提供 `.pptx`，自动将原始页面渲染成 PNG。
-- 可选提供风格描述，或少量全局参考风格图片。
-- 默认以 PNG + OCR/视觉识别为内容依据；数字敏感型材料可启用原生文字严格保护。
-- 标题、正文、卡片、表格、箭头和结构图形尽量恢复为可编辑 PowerPoint 对象。
-- 软件截图、照片、复杂图表和插画可按需保留为独立图片区域。
-- 自动识别完全重复页面，复用全局素材，并支持断点续跑。
-- 内置 `editppt` 可编辑重建运行时。
+这是一个内容保护型 Codex Skill。原始 PPT 页面是文字、数据、图表、引用、Logo 和页序的唯一依据；用户提供的参考图只用于定义视觉风格。
 
-## 速度模式
+## 最终交付什么
 
-| 模式 | 处理方式 | 适用场景 |
-| --- | --- | --- |
-| `balanced` | 重绘封面和视觉概念页，截图型页面直接重建 | 默认推荐 |
-| `fast` | 尽量减少整页生成，更多复杂区域作为图片保留 | 教程和截图较多的 PPT |
-| `strict` | 每个不重复页面都重绘，并完整执行逐页素材分离 | 追求最大程度的对象级可编辑 |
+- 一套视觉更统一、更有完成度的演示文稿。
+- 最终 `.pptx` 中的原生可编辑文本和结构对象。
+- 截图、照片、图表、复杂插画等在拆解不会带来有效编辑价值时，保留为独立图片区域。
+- 与原始页、生成图 hash 绑定的逐页审核记录与交付 gate：未审核、内容被替换、或整页截图式的结果都不能通过。
+
+它不是“把整页截图贴进 PPT，再盖一层文字”。
+
+## 内容与风格严格分离
+
+| 只能来自原始 PPT | 可以来自用户提供的风格参考图 |
+| --- | --- |
+| 文案、数字、表格、图表、引用、Logo、阅读顺序 | 色彩、字体气质、留白、边框、阴影、装饰语言 |
+
+医疗、金融、法律、科研或数字密集型材料可开启严格文本保护：原始原生文字与关键数值会作为重建的权威依据。
 
 ## 安装
-
-使用 Skills CLI 全局安装：
 
 ```bash
 npx skills add Moxi-Lab/ppt-visual-replicator \
   --skill ppt-visual-replicator --global --yes
 ```
 
-也可以手动安装：
+也可以 clone 本仓库后，将 `skills/ppt-visual-replicator` 拷贝到 `~/.codex/skills/`。完成后新建一个 Codex 任务，让 Skill 列表刷新。
 
-```bash
-git clone https://github.com/Moxi-Lab/ppt-visual-replicator.git
-mkdir -p ~/.codex/skills
-cp -R ppt-visual-replicator/skills/ppt-visual-replicator ~/.codex/skills/
+## 怎么使用
+
+向 Codex 提供一个 `.pptx`，然后直接说：
+
+```text
+使用 $ppt-visual-replicator 将这套 PPT 重做为可编辑 PPTX。
+保留原始页面的所有结论、数字、图表、引用、Logo 和页序。
 ```
 
-安装后请新建一个 Codex 任务，让 Skill 列表重新加载。
+还可以补充：
 
-## 环境要求
+- 只处理某一页。
+- 一句简短的风格描述。
+- 一张或多张用户提供的参考风格 PNG。
+- 开启严格文本保护。
+
+参考图不能提供事实、文案、图表、Logo 或布局内容。
+
+## 一次运行会发生什么
+
+1. 渲染所需页面，并验证原始 PNG 是否完整可用。
+2. 用内置 imagegen 重绘需要生成的页面。
+3. 每页生成后立刻人工比对，并写入与图像 hash 绑定的审核 checkpoint。
+4. 先通过生成交付 gate，再进入可编辑重建。
+5. 在本地把已通过审核的页面重建为可编辑 PowerPoint 对象。
+6. 校验可编辑性，再渲染最终 PPT 做视觉 QA。
+
+每页都有独立状态和审核证据。运行被中断后，从已记录的 checkpoint 接续；已经审核通过的页面不应重新生成。
+
+## 本地依赖
 
 - Python 3.10+
 - LibreOffice（`soffice` 或 `libreoffice`）
 - Poppler（`pdftoppm`）
-- 支持内置图片生成，并且 `editppt` 能访问图片处理后端的 Codex 环境
+- 支持内置图片生成的 Codex 环境
 
 macOS：
 
@@ -61,43 +83,14 @@ Ubuntu/Debian：
 sudo apt-get install libreoffice poppler-utils
 ```
 
-首次使用时，Skill 会自动安装内置的可编辑 PPT 运行时。
+首次需要时会自动安装内置 `editppt` 运行时；复用前会核验它确实加载的是当前 skill 的源码。
 
-## 使用方法
-
-在 Codex 中提供一个 PPTX，然后输入：
-
-```text
-使用 $ppt-visual-replicator 的 balanced 模式重绘这个 PPT，并返回可编辑的 PPTX。
-```
-
-还可以补充：
-
-- `fast`、`balanced` 或 `strict` 速度模式
-- 只处理某一页
-- 风格描述
-- 一张或少量全局参考风格 PNG
-- 开启原生文字严格保护
-
-## 工作流程
-
-```text
-PPTX -> 原始页面 PNG -> 页面生成计划
-     -> 选择性视觉重绘 -> 可编辑对象重建
-     -> 验证 -> 最终真实渲染检查 -> 可编辑 PPTX
-```
-
-完全重复的页面只处理一次。重复出现的 Logo、吉祥物、装饰元素和页面标识可以进入全局素材库，在整套 PPT 中复用。
-
-## 开发与测试
-
-运行测试：
+## 开发校验
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests -v
+python3 /path/to/skill-creator/scripts/quick_validate.py skills/ppt-visual-replicator
 ```
-
-如果本机安装了 OpenAI `skill-creator` Skill，可使用其中的 `quick_validate.py` 检查 Skill 包结构。
 
 ## 开源协议
 

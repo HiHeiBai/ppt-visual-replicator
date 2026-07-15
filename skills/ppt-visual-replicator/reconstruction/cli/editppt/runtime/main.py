@@ -30,6 +30,7 @@ from formula_renderer import (
 
 RUNTIME_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = RUNTIME_DIR.parents[3]
+CLI_ROOT = RUNTIME_DIR.parents[1]
 PROMPT_BUILDER = SKILL_ROOT / "reconstruction" / "scripts" / "build-page-worker-prompt.py"
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 
@@ -46,6 +47,19 @@ def cli_prog() -> str:
 def print_json(payload: dict) -> int:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def runtime_info_payload() -> dict:
+    """Return the source location used by this running CLI for installer verification."""
+    return {
+        "schema": "editppt.runtime-info.v1",
+        "package": "image-to-editable-ppt-cli",
+        "source_root": str(CLI_ROOT.resolve()),
+    }
+
+
+def cmd_runtime_info(args: argparse.Namespace) -> int:
+    return print_json(runtime_info_payload())
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -462,6 +476,13 @@ Use '<command> --help' for exact arguments:
 """,
     )
     sub = parser.add_subparsers(dest="command", metavar="command", required=True)
+
+    runtime_info = sub.add_parser(
+        "runtime-info",
+        help="Print machine-readable CLI provenance for runtime verification.",
+    )
+    runtime_info.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    runtime_info.set_defaults(func=cmd_runtime_info)
 
     setup = sub.add_parser(
         "setup",

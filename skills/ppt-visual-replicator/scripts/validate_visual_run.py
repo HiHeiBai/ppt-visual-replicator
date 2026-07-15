@@ -11,6 +11,7 @@ from typing import Any
 from PIL import Image, ImageFilter, UnidentifiedImageError
 
 from pptx_inspect import InputError, inspect_pptx
+from validate_generation_delivery import validate_generation_delivery
 
 
 def _sha256(path: Path) -> str:
@@ -92,6 +93,22 @@ def _visual_ink_projection_distance(left: Path, right: Path) -> float | None:
     return max(row_distance, column_distance)
 
 
+def _is_direct_deck_run(root: Path) -> bool:
+    return (root / "deck-run.json").is_file() and (root / "generation-plan.json").is_file()
+
+
+def _direct_generated_checks(root: Path, errors: list[str]) -> dict[str, Any]:
+    try:
+        gate = validate_generation_delivery(root)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        errors.append(f"direct generation validation failed to run: {exc}")
+        return {"run_type": "direct_deck", "pages": []}
+    errors.extend(str(error) for error in gate.get("errors", []))
+    evidence = dict(gate.get("evidence") or {})
+    evidence["run_type"] = "direct_deck"
+    return evidence
+
+
 def _reconstruction_preview_checks(
     root: Path,
     reconstruction_validation: Path,
@@ -160,6 +177,72 @@ def _reconstruction_preview_checks(
             evidence["editable_preview_visual_drifts"] += 1
             errors.append(
                 f"editable preview visual drift on slide {slide}: "
+                f"structure_distance={structure_distance:.2f}, pixel_distance={pixel_distance:.2f}, "
+                f"ink_projection_distance={ink_projection_distance:.3f}"
+            )
+    return evidence
+
+
+def _direct_reconstruction_preview_checks(
+    root: Path,
+    reconstruction_validation: Path,
+    errors: list[str],
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "editable_preview_checks": 0,
+        "editable_preview_visual_drifts": 0,
+        "editable_preview_max_structure_distance": 0.0,
+        "editable_preview_max_pixel_distance": 0.0,
+        "editable_preview_max_ink_projection_distance": 0.0,
+    }
+    if reconstruction_validation.parent.name != "final":
+        errors.append("reconstruction validation must be inside the reconstruction run final directory")
+        return evidence
+    reconstruction_root = reconstruction_validation.parent.parent
+    try:
+        page_jobs = json.loads((reconstruction_root / "page_jobs.json").read_text(encoding="utf-8"))
+        deck = json.loads((root / "deck-run.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"direct reconstruction preview evidence is unavailable: {exc}")
+        return evidence
+
+    reconstructed_pages = page_jobs.get("pages", [])
+    direct_pages = deck.get("pages", [])
+    if len(reconstructed_pages) != len(direct_pages):
+        errors.append(
+            "direct reconstruction preview count mismatch: "
+            f"expected {len(direct_pages)}, found {len(reconstructed_pages)}"
+        )
+        return evidence
+    for direct_page, reconstructed in zip(direct_pages, reconstructed_pages):
+        slide = int(direct_page.get("target_slide", 0))
+        generated = root / str(direct_page.get("generated_image", ""))
+        page_dir = reconstruction_root / str(reconstructed.get("page_dir", ""))
+        preview = page_dir / "preview.png"
+        if not generated.is_file() or not preview.is_file():
+            errors.append(f"missing direct editable preview evidence for slide {slide}")
+            continue
+        structure_distance = _visual_structure_distance(generated, preview)
+        pixel_distance = _visual_pixel_mean_distance(generated, preview)
+        ink_projection_distance = _visual_ink_projection_distance(generated, preview)
+        if structure_distance is None or pixel_distance is None or ink_projection_distance is None:
+            errors.append(f"invalid direct editable preview evidence for slide {slide}")
+            continue
+        evidence["editable_preview_checks"] += 1
+        evidence["editable_preview_max_structure_distance"] = max(
+            evidence["editable_preview_max_structure_distance"], round(structure_distance, 2)
+        )
+        evidence["editable_preview_max_pixel_distance"] = max(
+            evidence["editable_preview_max_pixel_distance"], round(pixel_distance, 2)
+        )
+        evidence["editable_preview_max_ink_projection_distance"] = max(
+            evidence["editable_preview_max_ink_projection_distance"],
+            round(ink_projection_distance, 3),
+        )
+        if structure_distance > 5.0 or pixel_distance > 12.0 or ink_projection_distance > 0.22:
+            evidence["editable_preview_visual_drifts"] += 1
+            errors.append(
+                f"direct editable preview visual drift on slide {slide}: "
                 f"structure_distance={structure_distance:.2f}, pixel_distance={pixel_distance:.2f}, "
                 f"ink_projection_distance={ink_projection_distance:.3f}"
             )
@@ -364,6 +447,8 @@ def _final_checks(
     reconstruction_validation: Path | None,
     errors: list[str],
     warnings: list[str],
+    *,
+    direct_run: bool,
 ) -> dict[str, Any]:
     evidence = {
         "slides": 0,
@@ -383,15 +468,28 @@ def _final_checks(
         if payload.get("passed") is not True:
             errors.append("reconstruction validation did not pass")
         else:
-            evidence.update(
-                _reconstruction_preview_checks(root, reconstruction_validation, errors)
+            preview_checks = (
+                _direct_reconstruction_preview_checks
+                if direct_run
+                else _reconstruction_preview_checks
             )
+            evidence.update(preview_checks(root, reconstruction_validation, errors))
 
     source_path = root / "source-ledger.json"
     if not source_path.is_file():
         errors.append(f"source ledger is missing: {source_path}")
         return evidence
     source = json.loads(source_path.read_text(encoding="utf-8"))
+    try:
+        direct_run = json.loads((root / "deck-run.json").read_text(encoding="utf-8"))
+        strict_native = direct_run.get("text_protection_mode") == "strict-native"
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Legacy runs did not record a mode. Preserve their conservative
+        # behaviour rather than silently weakening an existing validation.
+        strict_native = True
+    evidence["text_validation_mode"] = (
+        "source-ledger-exact" if strict_native else "page-manifest-and-visual-qa"
+    )
     try:
         final = inspect_pptx(final_pptx)
     except InputError as exc:
@@ -405,24 +503,24 @@ def _final_checks(
 
     for source_slide, final_slide in zip(source.get("slides", []), final.get("slides", [])):
         slide_number = int(source_slide["slide_number"])
-        source_tokens = set(source_slide.get("critical_tokens", []))
-        final_tokens = set(final_slide.get("critical_tokens", []))
-        missing_tokens = sorted(source_tokens - final_tokens)
-        evidence["critical_tokens_checked"] += len(source_tokens)
-        evidence["critical_tokens_missing"] += len(missing_tokens)
-        if missing_tokens:
-            errors.append(f"missing critical tokens on slide {slide_number}: {', '.join(missing_tokens)}")
-
         final_text = _normalize(" ".join(final_slide.get("texts", [])))
-        missing_blocks = [
-            text
-            for text in source_slide.get("texts", [])
-            if _normalize(text) and _normalize(text) not in final_text
-        ]
-        evidence["required_text_blocks_checked"] += len(source_slide.get("texts", []))
-        evidence["required_text_blocks_missing"] += len(missing_blocks)
-        if missing_blocks:
-            errors.append(f"missing required source text on slide {slide_number}: {missing_blocks[:3]}")
+        source_texts = [text for text in source_slide.get("texts", []) if _normalize(text)]
+        if strict_native:
+            source_tokens = set(source_slide.get("critical_tokens", []))
+            final_tokens = set(final_slide.get("critical_tokens", []))
+            missing_tokens = sorted(source_tokens - final_tokens)
+            evidence["critical_tokens_checked"] += len(source_tokens)
+            evidence["critical_tokens_missing"] += len(missing_tokens)
+            if missing_tokens:
+                errors.append(f"missing critical tokens on slide {slide_number}: {', '.join(missing_tokens)}")
+
+            missing_blocks = [text for text in source_texts if _normalize(text) not in final_text]
+            evidence["required_text_blocks_checked"] += len(source_texts)
+            evidence["required_text_blocks_missing"] += len(missing_blocks)
+            if missing_blocks:
+                errors.append(f"missing required source text on slide {slide_number}: {missing_blocks[:3]}")
+        elif source_texts and not final_text:
+            errors.append(f"final slide lost all editable text: slide {slide_number}")
 
         if (
             int(final_slide.get("picture_count", 0)) == 1
@@ -447,7 +545,12 @@ def validate_visual_run(
     root = Path(run_dir).expanduser().resolve()
     errors: list[str] = []
     warnings: list[str] = []
-    evidence: dict[str, Any] = _generated_checks(root, errors, warnings)
+    direct_run = _is_direct_deck_run(root)
+    evidence: dict[str, Any] = (
+        _direct_generated_checks(root, errors)
+        if direct_run
+        else _generated_checks(root, errors, warnings)
+    )
     if stage == "final":
         evidence.update(
             _final_checks(
@@ -456,6 +559,7 @@ def validate_visual_run(
                 Path(reconstruction_validation).expanduser().resolve() if reconstruction_validation else None,
                 errors,
                 warnings,
+                direct_run=direct_run,
             )
         )
     result = {

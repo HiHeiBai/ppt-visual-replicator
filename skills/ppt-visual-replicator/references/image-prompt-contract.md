@@ -1,18 +1,11 @@
 # Image Prompt Contract
 
-For calibration jobs, use `editppt image edit` with two ordered image inputs:
+Use the deprecated compatibility runner only when a historical run requires it. It uses two ordered image inputs:
 
 1. Target slide image: edit target and content authority.
-2. Reference slide image: visual-style authority only.
+2. Immutable user-supplied reference slide image: visual-style authority only.
 
-Generate the first target page in every active family as a calibration page. Review those pages before approving them. For every later page in the family, use two ordered inputs:
-
-1. Target slide image: edit target and content authority.
-2. Approved generated calibration page: layout and visual-style authority for the layout skeleton, title position, margins, content containers, footer, palette, decorative density, and recurring chrome.
-
-For scale jobs, map the target's logical content groups into the calibration layout skeleton. Do not preserve the target's original visual layout. Change the skeleton only when the target has a genuinely different number or type of logical groups, and preserve the same deck-level geometry when adapting it.
-
-Do not send the original reference page again during scale generation. It already influenced the approved calibration page and can cause reference wording, charts, or study facts to leak into later target pages.
+Use the original immutable reference again for every target page. Never feed a generated page, preview, reconstruction artifact, or prior-run output back into imagegen. A generated page is review evidence only; it is never a later style or layout input.
 
 Every prompt must require:
 
@@ -28,4 +21,4 @@ Every prompt must require:
 
 Record target, reference, prompt, output, model, size, quality, status, and SHA-256 values for every page.
 
-For a one-page family, generate that page directly with the target and the locked reference; no calibration approval is required. Do not execute scale jobs until `calibration-approved.json` records the current output hash for every multi-page family. If an approved calibration output changes, invalidate scale execution and require approval again.
+Record the user-reference provenance and SHA-256 hash for every page. Do not create calibration or scale jobs.

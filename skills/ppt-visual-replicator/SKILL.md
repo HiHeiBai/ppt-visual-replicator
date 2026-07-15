@@ -109,6 +109,15 @@ python3 scripts/record_generation_review.py \
 
 `--accept` is the reviewer’s explicit confirmation that structure, content firewall, and style checks all passed. Do not accept a page that fails any of them.
 
+After recording all required page reviews, run the direct-generation gate before reconstruction:
+
+```bash
+RUN="output/deck"  # Use the same path passed to --run-dir.
+python3 scripts/validate_generation_delivery.py --run-dir "$RUN"
+```
+
+Do not continue to reconstruction while this gate reports an unreviewed page, changed PNG, changed source image, or missing review check.
+
 For an exact duplicate source page, reuse the canonical generated PNG only when `generation-plan.json` marks it `reuse`; do not make an extra image call.
 
 ### 3. Rebuild locally as editable PPTX

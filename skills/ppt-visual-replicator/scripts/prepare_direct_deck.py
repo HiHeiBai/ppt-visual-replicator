@@ -143,7 +143,7 @@ def _generation_route(
         if family == "cover":
             return "generate", "fast profile redraws the cover as the deck style seed"
         return "direct-rebuild", "fast profile preserves the page and skips whole-slide imagegen"
-    if family in {"cover", "chart_figure"}:
+    if family in {"cover", "chart"}:
         return "generate", f"balanced profile redraws {family} pages"
     return (
         "direct-rebuild",

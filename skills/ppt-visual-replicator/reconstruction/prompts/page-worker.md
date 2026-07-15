@@ -17,10 +17,12 @@ Canonical duplicate page dir: {{CANONICAL_PAGE_DIR}}
 
 You own only this Page dir. Do not edit deck_manifest.json, page_jobs.json, notes_manifest.json, final outputs, the original input, or any other page directory.
 
-MANDATORY FIRST ACTION — before looking at the source image, before any decision, before any tool call other than reading: read these three files in full. Do not skim, do not rely on prior knowledge of them, do not start reconstruction first and consult them later. Every past failure mode of this skill is encoded in them; any decision made without having read them is invalid and will be redone.
-- {{SKILL_ROOT}}/references/page-decision-tree.md — the single source of truth for all object-source decisions: the three-step decision process, text-hints usage, the final self-check, and the fix-versus-warning split.
-- {{SKILL_ROOT}}/references/manifest-schema.md — the field contracts for manifest.json, validation.json, page_result.json, and imagegen-jobs.json.
-- {{SKILL_ROOT}}/references/cli-helper.md — editppt command syntax and examples.
+MANDATORY FIRST ACTION — read `{{SKILL_ROOT}}/references/fast-worker-contract.md` before looking at the source. It is the complete operating contract for `fast` and `balanced` pages. For `strict`, also read these three full references before making any decision:
+- {{SKILL_ROOT}}/references/page-decision-tree.md
+- {{SKILL_ROOT}}/references/manifest-schema.md
+- {{SKILL_ROOT}}/references/cli-helper.md
+
+For `fast` and `balanced`, consult the relevant full reference only when the compact contract says to, a page is ambiguous, or `editppt page validate` fails. Do not repeat a full reference read for ordinary pages that already fit the compact contract.
 
 Hard rules (reminders only; the details and rationale live in the references above):
 1. Follow the declared speed profile. In `strict`, every non-text foreground visual object uses the asset-sheet workflow. In `balanced` or `fast`, first reuse the deck shared asset index; a self-contained screenshot, photo, chart image, or complex illustration may use `{{SKILL_ROOT}}/scripts/extract-page-region.py` and `source_type: profile-rasterized-region`. Main text and structural objects remain native. No profile permits a complete-slide raster background with editable text over it.
@@ -43,7 +45,7 @@ Work through the page in this order:
 1. Build the page inventory (Pre-Decision Checklist in page-decision-tree.md).
 2. Decide the background (page-decision-tree.md section 1) and record `background_strategy`.
 3. Decide foreground asset sources (section 2). Reuse matching shared assets first. In strict mode, or for non-eligible objects, run page-local image jobs serially with `editppt image generate` or `editppt image edit`; do not use a batch interface. In fast/balanced mode, extract eligible self-contained regions with `extract-page-region.py`, keeping their main placement in `box_px` and recording `profile-rasterized-region` provenance with `region_reason`. Put remaining icons/foreground objects onto one sparse asset sheet when they fit. After each selected generated output, record and process it with `editppt image import` and `editppt image process-sheet`.
-4. Rebuild native text, shapes, and tables (section 3). Fill `text_boxes` from the measured text hints per section 3.1; render formulas with `editppt formula render-latex` per section 3.2.
+4. Rebuild native text, shapes, and tables. Fill `text_boxes` from measured text hints; if this fast run used `editppt prepare --no-text-hints`, run `editppt page hints {{PAGE_DIR}}` now, immediately before text reconstruction. Render formulas with `editppt formula render-latex`.
 5. Write manifest.json following the field contracts in manifest-schema.md, including `speed_profile`, `text_inventory`, `visual_inventory`, `background_strategy`, `quality_checks`, and positioned `text_boxes`/`images`/`shapes`.
 6. Build the artifacts with the deterministic runtime: `editppt page build {{PAGE_DIR}}` (writes page.pptx and preview.png from manifest.json), then `editppt page contact-sheet {{PAGE_DIR}}`, then `editppt page validate {{PAGE_DIR}}` — it runs the same manifest-contract checks `editppt run record` will run, so fix every reported issue here, inside the page.
 

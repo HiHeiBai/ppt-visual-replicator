@@ -166,7 +166,7 @@ Exceptions — text that is part of brand or background identity rather than edi
 
 Explain each exception in `visual_inventory` or `asset_provenance`. Never disguise main titles, subtitles, body text, table text, legends, axis labels, numbers, tags, or button text as exceptions.
 
-Do not guess font sizes or positions by eye — `editppt prepare` already measured them. Every page dir contains `text_hints.json` (each detected line's source-pixel `box_px`, glyph height, and derived font sizes; the `backend` field records which detector produced them) and `text_hints.png`, the source image with every detected line framed and labeled. If missing, regenerate with `editppt page hints <page_dir>`. Use the hints like this:
+Do not guess font sizes or positions by eye — use the measured hints. By default `editppt prepare` creates `text_hints.json` (each detected line's source-pixel `box_px`, glyph height, and derived font sizes; the `backend` field records which detector produced them) and `text_hints.png`, the source image with every detected line framed and labeled. Fast deck runs may defer them with `--no-text-hints`; in that case create them immediately before this native-text stage with `editppt page hints <page_dir>`. Use the hints like this:
 
 - Match each detected line in the overlay image to the text you read in the source.
 - Copy the measured `box_px` and the matching font size column (`font_pt_if_cjk` for CJK text, `font_pt_if_latin` for Latin) into the corresponding `text_boxes` item.
@@ -241,7 +241,7 @@ The background must not cover text, foreground assets must sit on the right laye
 
 ## Final Self-Check
 
-Whoever rebuilds the page checks it once against this list — deterministic validation is necessary but not sufficient, and the parent agent does not repeat this check. Record the evidence in structured manifest fields and `validation.json`. (Deck-level structural QA at finalize time is in `SKILL.md` Phase 4.)
+Whoever rebuilds the page checks it once against this list — deterministic validation is necessary but not sufficient, and the parent agent does not repeat this check. Record the evidence in structured manifest fields and `validation.json`. (Deck-level structural QA at finalize time is in `SKILL.md` Step 5.)
 
 Structure and artifacts:
 

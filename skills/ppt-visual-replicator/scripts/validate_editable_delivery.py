@@ -42,6 +42,7 @@ def validate_editable_delivery(run_dir: str | Path, pptx: str | Path) -> dict[st
         "slide_count": 0,
         "slides_with_required_native_text": 0,
         "image_only_slides": 0,
+        "text_validation_mode": "unknown",
     }
 
     deck_run = root / "deck-run.json"
@@ -99,6 +100,11 @@ def validate_editable_delivery(run_dir: str | Path, pptx: str | Path) -> dict[st
         return result
 
     source = json.loads(source_ledger.read_text(encoding="utf-8"))
+    direct_manifest = json.loads(deck_run.read_text(encoding="utf-8"))
+    strict_native = direct_manifest.get("text_protection_mode") == "strict-native"
+    evidence["text_validation_mode"] = (
+        "source-ledger-exact" if strict_native else "page-manifest-and-visual-qa"
+    )
     try:
         final = inspect_pptx(candidate)
     except InputError as exc:
@@ -123,13 +129,20 @@ def validate_editable_delivery(run_dir: str | Path, pptx: str | Path) -> dict[st
         slide_number = int(source_slide.get("slide_number", 0))
         final_text = _normalize(" ".join(final_slide.get("texts", [])))
         required = [text for text in source_slide.get("texts", []) if _normalize(text)]
-        missing = [text for text in required if _normalize(text) not in final_text]
-        if missing:
-            errors.append(
-                f"final slide {slide_number} is missing editable source text: {missing[:3]}"
-            )
-        elif required:
-            evidence["slides_with_required_native_text"] += 1
+        if strict_native:
+            missing = [text for text in required if _normalize(text) not in final_text]
+            if missing:
+                errors.append(
+                    f"final slide {slide_number} is missing editable source text: {missing[:3]}"
+                )
+            elif required:
+                evidence["slides_with_required_native_text"] += 1
+        elif required and not final_text:
+            # Page-level validation checks the worker's visual-OCR text
+            # inventory. Keep a final safety net for a page that lost all
+            # editable text, without incorrectly treating hidden/stale OOXML
+            # strings in the original PPTX as default-mode hard requirements.
+            errors.append(f"final slide {slide_number} lost all editable text")
 
         if (
             int(final_slide.get("picture_count", 0)) == 1

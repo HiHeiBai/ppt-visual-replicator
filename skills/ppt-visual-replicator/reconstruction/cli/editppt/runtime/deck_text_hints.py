@@ -68,7 +68,12 @@ def synthesize_pdf(page_dirs: list[Path], out_path: Path) -> None:
     the OCR coordinates back to each source.png regardless of the resolution
     the service rendered at.
     """
-    import fitz
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyMuPDF is required to bundle page images for PaddleOCR; use builtin-ink or reinstall editppt with dependencies."
+        ) from exc
 
     document = fitz.open()
     for page_dir in page_dirs:
@@ -134,8 +139,8 @@ def main() -> int:
             "detector (geometry only — it measures where text is and how large, but cannot read "
             "it). Continue with builtin-ink plus the original source ledger; missing OCR credentials "
             "must not pause or skip editable reconstruction. A PaddleOCR-VL token can be configured "
-            "later (https://aistudio.baidu.com/account/accessToken, then `editppt config "
-            "--paddle-ocr-token <token>` and `editppt run hints <run>`) to improve recognition.",
+            "later (https://aistudio.baidu.com/account/accessToken, then `PADDLE_OCR_TOKEN=... "
+            "editppt config --paddle-ocr-token-from-env` and `editppt run hints <run>`) to improve recognition.",
             file=sys.stderr,
         )
     if token:

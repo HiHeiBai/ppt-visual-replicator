@@ -109,7 +109,7 @@ class SpeedProfileTest(unittest.TestCase):
             ],
         )
 
-    def test_balanced_routes_visual_pages_and_reuses_exact_duplicates(self) -> None:
+    def test_balanced_routes_multi_image_pages_to_direct_rebuild_and_reuses_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manifest = prepare_direct_deck(
@@ -119,8 +119,8 @@ class SpeedProfileTest(unittest.TestCase):
             )
 
             self.assertEqual(manifest["speed_profile"], "balanced")
-            self.assertEqual(manifest["generation_summary"]["generate"], 2)
-            self.assertEqual(manifest["generation_summary"]["direct-rebuild"], 1)
+            self.assertEqual(manifest["generation_summary"]["generate"], 1)
+            self.assertEqual(manifest["generation_summary"]["direct-rebuild"], 2)
             self.assertEqual(manifest["generation_summary"]["reuse"], 1)
             self.assertEqual(manifest["pages"][3]["generation"]["action"], "reuse")
             self.assertEqual(manifest["pages"][3]["generation"]["canonical_slide"], 2)

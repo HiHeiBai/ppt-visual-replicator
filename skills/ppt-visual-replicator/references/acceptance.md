@@ -19,7 +19,7 @@
 - `editppt` page validation passes and the final PPTX opens.
 - A deck run contains the same slide count and order as the requested target pages.
 - Required text and critical numeric tokens from the target are present as editable objects where practical.
-- In `visual-ocr` mode, editable text is recovered from the original source PNG with OCR/vision, not from generated text alone. In `strict-native` mode, every ledger-required text and critical token is validated exactly.
+- In `visual-ocr` mode, editable text is recovered from the original source PNG with OCR/vision, recorded in the page `text_inventory`, and verified by page validation plus final visual QA; hidden or stale native OOXML strings are not a final hard requirement. In `strict-native` mode, every ledger-required text and critical token is validated exactly.
 - The editable preview remains visually faithful to the generated slide; structural validation alone is not enough.
 - Complex charts, paper screenshots, and scientific illustrations may remain independent image objects.
 - In `fast` and `balanced`, eligible self-contained visual regions use `profile-rasterized-region` with a recorded reason. They never cover the complete slide behind editable text. In `strict`, every foreground visual follows the asset-sheet separation contract.

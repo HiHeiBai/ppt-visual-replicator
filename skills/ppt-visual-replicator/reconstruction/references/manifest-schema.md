@@ -23,7 +23,7 @@ Key fields:
   "schema_version": 1,
   "run_id": "job-id",
   "input_type": "image|images|pdf|pptx",
-  "max_concurrent_pages": 6,
+  "max_concurrent_pages": 3,
   "image_backend": {},
   "pages": [],
   "notes_manifest": "notes_manifest.json",
@@ -49,7 +49,7 @@ Structure:
 {
   "schema_version": 1,
   "run_id": "job-id",
-  "max_concurrent_pages": 6,
+  "max_concurrent_pages": 3,
   "pages": [
     {
       "page_id": "page_001",

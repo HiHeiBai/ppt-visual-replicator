@@ -160,7 +160,12 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
         height = float(source.get("height_px", 0))
         if width <= 0 or height <= 0:
             raise ChromeError(f"manifest source dimensions are missing: {manifest_path}")
-        scale = width / 1920.0
+        # Chrome configuration is authored against a 1920x1080 source grid.
+        # Scale horizontal and vertical measurements independently so 4:3 and
+        # custom-aspect source pages do not drift vertically.
+        scale_x = width / 1920.0
+        scale_y = height / 1080.0
+        scale_shape = min(scale_x, scale_y)
         _remove_old_chrome(manifest, width, height)
 
         per_page_title_sizes = {str(key): value for key, value in title_config.get("per_page_sizes", {}).items()}
@@ -170,17 +175,17 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
             if title_config and y < height * 0.16 and "title" in item_id.lower():
                 size = per_page_title_sizes.get(str(slide_number), title_config.get("size"))
                 if size is not None:
-                    item["font_size"] = _scaled(size, scale)
+                    item["font_size"] = _scaled(size, scale_y)
                 item.update({"font": font, "font_size_source": "measured", "fit_text": False})
             if footer_config and y > height * 0.84 and FOOTER_ID_PATTERN.search(item_id):
                 if footer_config.get("size") is not None:
-                    item["font_size"] = _scaled(footer_config["size"], scale)
+                    item["font_size"] = _scaled(footer_config["size"], scale_y)
                 item.update({"font": font, "font_size_source": "measured", "fit_text": False})
 
         if marker_config and marker_asset:
-            size = _scaled(marker_config.get("size", 70), scale)
-            left = _scaled(marker_config.get("left", 32), scale)
-            bottom = _scaled(marker_config.get("bottom", 28), scale)
+            size = _scaled(marker_config.get("size", 70), scale_shape)
+            left = _scaled(marker_config.get("left", 32), scale_x)
+            bottom = _scaled(marker_config.get("bottom", 28), scale_y)
             top = round(height - bottom - size, 1)
             assets_dir = page_dir / "assets"
             assets_dir.mkdir(parents=True, exist_ok=True)
@@ -204,13 +209,13 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
                     "provenance_note": "Copied from the user-selected global page-number marker asset.",
                 }
             )
-            padding = _scaled(marker_config.get("text_vertical_padding", 5), scale)
+            padding = _scaled(marker_config.get("text_vertical_padding", 5), scale_y)
             manifest.setdefault("text_boxes", []).append(
                 {
                     "id": "global-page-number",
                     "text": str(slide_number),
                     "box_px": [left, top + padding, size, size - 2 * padding],
-                    "font_size": _scaled(marker_config.get("font_size", 18), scale),
+                    "font_size": _scaled(marker_config.get("font_size", 18), scale_y),
                     "font_size_source": "measured",
                     "fit_text": False,
                     "font": font,
@@ -230,11 +235,11 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
                     {"slide": slide_number, "warning": "top tag skipped because the source has no explicit tag label"}
                 )
             else:
-                tag_width = _scaled(tag_config.get("width", 210), scale)
-                tag_height = _scaled(tag_config.get("height", 44), scale)
-                right = _scaled(tag_config.get("right", 60), scale)
+                tag_width = _scaled(tag_config.get("width", 210), scale_x)
+                tag_height = _scaled(tag_config.get("height", 44), scale_y)
+                right = _scaled(tag_config.get("right", 60), scale_x)
                 tag_left = round(width - right - tag_width, 1)
-                tag_top = _scaled(tag_config.get("top", 42), scale)
+                tag_top = _scaled(tag_config.get("top", 42), scale_y)
                 manifest.setdefault("shapes", []).append(
                     {
                         "id": "global-top-tag",
@@ -248,8 +253,8 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
                         "z_index": 170,
                     }
                 )
-                inset_x = _scaled(tag_config.get("inset_x", 8), scale)
-                inset_y = _scaled(tag_config.get("inset_y", 6), scale)
+                inset_x = _scaled(tag_config.get("inset_x", 8), scale_x)
+                inset_y = _scaled(tag_config.get("inset_y", 6), scale_y)
                 manifest.setdefault("text_boxes", []).append(
                     {
                         "id": "global-top-tag-text",
@@ -260,7 +265,7 @@ def normalize_run(run_dir: str | Path, config_path: str | Path) -> dict[str, Any
                             tag_width - 2 * inset_x,
                             tag_height - 2 * inset_y,
                         ],
-                        "font_size": _scaled(tag_config.get("font_size", 15), scale),
+                        "font_size": _scaled(tag_config.get("font_size", 15), scale_y),
                         "font_size_source": "measured",
                         "fit_text": False,
                         "font": font,

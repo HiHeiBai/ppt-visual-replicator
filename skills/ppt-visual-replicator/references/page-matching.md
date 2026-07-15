@@ -8,7 +8,8 @@ Classify target and reference pages as one of:
 - `toc`
 - `section`
 - `table`
-- `chart_figure`
+- `chart`
+- `multi_image`
 - `image_content`
 - `content`
 - `conclusion`
@@ -28,4 +29,4 @@ Use `image_content` for pages with one source image plus explanatory text, such 
 
 Do not select later reference decks automatically. Use them only with `--allow-fallback-decks` or an explicit override, and record the deck switch as a warning. Apply explicit overrides after validating that the referenced deck and page exist.
 
-Stop when the primary deck has no `cover`, `table`, or `chart_figure` anchor and fallback decks were not explicitly enabled. When it has no explicit ending page, reuse its cover anchor and record a `cover_fallback` warning. For other missing families, reuse the primary deck's `content` anchor with a warning.
+Stop when the primary deck has no `cover`, `table`, or `chart` anchor and fallback decks were not explicitly enabled. When it has no explicit ending page, reuse its cover anchor and record a `cover_fallback` warning. For other missing families, reuse the primary deck's `content` anchor with a warning.

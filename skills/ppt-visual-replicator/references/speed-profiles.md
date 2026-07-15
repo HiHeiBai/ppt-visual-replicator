@@ -17,6 +17,8 @@ Use one profile for the complete deck. Record it in `deck-run.json`, every page 
 - Rebuild remaining pages directly with the shared style kit.
 - Apply the same native-text and no-full-slide-background rules as balanced mode.
 - Prefer preserving screenshots, photos, charts, and complex illustrations as positioned image regions.
+- For a multi-page deck with `--source-renderer auto`, use the one-pass LibreOffice/PDF source render. If it fails, record the failure and fall back to the direct Quick Look renderer. Inspect the first, midpoint, and last rendered source page before generation.
+- Prepare reconstruction with `--max-concurrent-pages 3 --no-text-hints`; create each page's text hints immediately before its native-text stage. Dispatch workers in batches of at most three.
 
 ## Strict
 
@@ -42,5 +44,6 @@ Use one profile for the complete deck. Record it in `deck-run.json`, every page 
 ## Resume and Cache
 
 - Use `prepare_direct_deck.py --resume` only with the same target hash, references, style brief, DPI, text-protection mode, and speed profile.
+- The source-renderer selection is also part of the resume contract.
 - Treat an existing non-empty `generated.png` as complete only when the run fingerprint matches.
 - Never regenerate a ready canonical page or exact duplicate.

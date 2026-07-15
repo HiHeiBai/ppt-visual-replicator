@@ -65,7 +65,11 @@ class SourceRenderingTest(unittest.TestCase):
             target = write_fixture_pptx(root / "target.pptx")
 
             def fake_runner(command, **_kwargs):
-                if "--convert-to" in command:
+                if "-t" in command:
+                    output = Path(command[command.index("-o") + 1])
+                    slide_number = int(Path(command[-1]).stem.rsplit("-", 1)[-1])
+                    write_png_header(output / f"slide-{slide_number:03d}.png")
+                elif "--convert-to" in command:
                     out_dir = Path(command[command.index("--outdir") + 1])
                     (out_dir / "target.pdf").write_bytes(b"%PDF-1.4")
                 else:

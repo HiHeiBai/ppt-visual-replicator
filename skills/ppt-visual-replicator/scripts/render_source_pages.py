@@ -13,12 +13,18 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from pptx_inspect import InputError, inspect_pptx
 
 
 class SourceRenderError(RuntimeError):
     pass
+
+
+P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+NS = {"p": P_NS}
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -61,6 +67,133 @@ def _run(
         raise SourceRenderError(f"renderer command failed: {command[0]}: {exc}") from exc
 
 
+def _write_single_slide_pptx(source: Path, destination: Path, slide_number: int) -> None:
+    """Create a temporary one-slide package without rewriting slide assets.
+
+    Quick Look produces one thumbnail per presentation. Retaining the selected
+    slide relationship together with the original theme, masters, layouts and
+    media lets macOS render that page directly from PPTX instead of asking
+    LibreOffice to reinterpret the complete document.
+    """
+
+    with ZipFile(source) as archive:
+        try:
+            presentation = ET.fromstring(archive.read("ppt/presentation.xml"))
+        except (KeyError, ET.ParseError) as exc:
+            raise SourceRenderError("PPTX has an unreadable presentation.xml") from exc
+        slide_list = presentation.find("p:sldIdLst", NS)
+        if slide_list is None:
+            raise SourceRenderError("PPTX has no slide relationship list")
+        slide_ids = list(slide_list)
+        if slide_number <= 0 or slide_number > len(slide_ids):
+            raise SourceRenderError(f"slide {slide_number} is outside the presentation")
+        selected = slide_ids[slide_number - 1]
+        for slide_id in slide_ids:
+            slide_list.remove(slide_id)
+        slide_list.append(selected)
+
+        with ZipFile(destination, "w", compression=ZIP_DEFLATED) as output:
+            for item in archive.infolist():
+                payload = (
+                    ET.tostring(presentation, encoding="utf-8", xml_declaration=True)
+                    if item.filename == "ppt/presentation.xml"
+                    else archive.read(item.filename)
+                )
+                output.writestr(item, payload)
+
+
+def _render_with_quicklook(
+    source: Path,
+    work: Path,
+    *,
+    slide_number: int,
+    qlmanage: str,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    timeout: int,
+) -> Path:
+    """Directly render one PPTX slide to PNG through the native macOS preview stack."""
+
+    slide_pptx = work / f"source-slide-{slide_number:03d}.pptx"
+    ql_output = work / f"quicklook-{slide_number:03d}"
+    ql_output.mkdir()
+    _write_single_slide_pptx(source, slide_pptx, slide_number)
+    _run(
+        [str(qlmanage), "-t", "-s", "2560", "-o", str(ql_output), str(slide_pptx)],
+        runner=runner,
+        timeout=timeout,
+    )
+    rendered = sorted(ql_output.glob("*.png"))
+    if len(rendered) != 1:
+        raise SourceRenderError(
+            f"Quick Look did not create exactly one PNG for slide {slide_number}"
+        )
+    return rendered[0]
+
+
+def _render_with_libreoffice(
+    source: Path,
+    work: Path,
+    *,
+    start: int,
+    end: int,
+    dpi: int,
+    soffice: str,
+    pdftoppm: str,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    timeout: int,
+) -> list[Path]:
+    """Compatibility fallback for systems without a direct native PPTX preview."""
+
+    office_profile = work / "office-profile"
+    office_profile.mkdir()
+    _run(
+        [
+            str(soffice),
+            f"-env:UserInstallation={office_profile.resolve().as_uri()}",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(work),
+            str(source),
+        ],
+        runner=runner,
+        timeout=timeout,
+    )
+    pdfs = [path for path in work.glob("*.pdf") if path.is_file() and path.stat().st_size]
+    if len(pdfs) != 1:
+        names = ", ".join(path.name for path in pdfs) or "none"
+        raise SourceRenderError(
+            f"PPTX conversion expected exactly one PDF but found {len(pdfs)}: {names}"
+        )
+    prefix = work / "slide"
+    _run(
+        [
+            str(pdftoppm),
+            "-png",
+            "-r",
+            str(dpi),
+            "-f",
+            str(start),
+            "-l",
+            str(end),
+            str(pdfs[0]),
+            str(prefix),
+        ],
+        runner=runner,
+        timeout=timeout,
+    )
+    rendered = sorted(
+        work.glob("slide-*.png"),
+        key=lambda path: int(path.stem.rsplit("-", 1)[-1]),
+    )
+    if len(rendered) != end - start + 1:
+        raise SourceRenderError(
+            f"source render page count mismatch: expected {end - start + 1}, got {len(rendered)}"
+        )
+    return rendered
+
+
 def render_pptx_to_pngs(
     pptx: str | Path,
     out_dir: str | Path,
@@ -72,6 +205,7 @@ def render_pptx_to_pngs(
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     tool_lookup: Callable[[str], str | None] = shutil.which,
     timeout: int = 300,
+    renderer: str = "auto",
 ) -> dict[str, Any]:
     source = Path(pptx).expanduser().resolve()
     destination = Path(out_dir).expanduser().resolve()
@@ -92,65 +226,57 @@ def render_pptx_to_pngs(
             f"render slide range does not exist: {start}-{end}; deck has {slide_count} slides"
         )
 
+    if renderer not in {"auto", "quicklook", "libreoffice"}:
+        raise SourceRenderError("renderer must be auto, quicklook, or libreoffice")
+    qlmanage = tool_lookup("qlmanage")
     soffice = tool_lookup("soffice") or tool_lookup("libreoffice")
     pdftoppm = tool_lookup("pdftoppm")
-    missing = [
-        name
-        for name, value in (("soffice/libreoffice", soffice), ("pdftoppm", pdftoppm))
-        if not value
-    ]
-    if missing:
-        raise SourceRenderError(f"source render dependency is unavailable: {', '.join(missing)}")
+    use_quicklook = renderer == "quicklook" or (renderer == "auto" and bool(qlmanage))
+    if use_quicklook and not qlmanage:
+        raise SourceRenderError("direct PPTX-to-PNG rendering requires qlmanage on this machine")
+    if not use_quicklook and (not soffice or not pdftoppm):
+        raise SourceRenderError(
+            "source render dependency is unavailable: soffice/libreoffice and pdftoppm are required"
+        )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ppt-source-render-", dir=destination.parent) as temp_dir:
         work = Path(temp_dir)
-        office_profile = work / "office-profile"
-        office_profile.mkdir()
-        _run(
-            [
-                str(soffice),
-                f"-env:UserInstallation={office_profile.resolve().as_uri()}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(work),
-                str(source),
-            ],
-            runner=runner,
-            timeout=timeout,
-        )
-        pdfs = [path for path in work.glob("*.pdf") if path.is_file() and path.stat().st_size]
-        if len(pdfs) != 1:
-            raise SourceRenderError("PPTX conversion did not create exactly one PDF")
-
-        prefix = work / "slide"
-        _run(
-            [
-                str(pdftoppm),
-                "-png",
-                "-r",
-                str(dpi),
-                "-f",
-                str(start),
-                "-l",
-                str(end),
-                str(pdfs[0]),
-                str(prefix),
-            ],
-            runner=runner,
-            timeout=timeout,
-        )
-        rendered = sorted(
-            work.glob("slide-*.png"),
-            key=lambda path: int(path.stem.rsplit("-", 1)[-1]),
-        )
-        expected_count = end - start + 1
-        if len(rendered) != expected_count:
-            raise SourceRenderError(
-                f"source render page count mismatch: expected {expected_count}, got {len(rendered)}"
+        if use_quicklook:
+            rendered = [
+                _render_with_quicklook(
+                    source,
+                    work,
+                    slide_number=slide_number,
+                    qlmanage=str(qlmanage),
+                    runner=runner,
+                    timeout=timeout,
+                )
+                for slide_number in range(start, end + 1)
+            ]
+            renderer_report = {
+                "engine": "quicklook",
+                "mode": "direct-pptx-to-png",
+                "command": Path(str(qlmanage)).name,
+            }
+        else:
+            rendered = _render_with_libreoffice(
+                source,
+                work,
+                start=start,
+                end=end,
+                dpi=dpi,
+                soffice=str(soffice),
+                pdftoppm=str(pdftoppm),
+                runner=runner,
+                timeout=timeout,
             )
+            renderer_report = {
+                "engine": "libreoffice",
+                "mode": "pptx-to-pdf-to-png-fallback",
+                "office": Path(str(soffice)).name,
+                "rasterizer": Path(str(pdftoppm)).name,
+            }
 
         destination.mkdir()
         pages: list[dict[str, Any]] = []
@@ -188,7 +314,7 @@ def render_pptx_to_pngs(
         "first_slide": start,
         "last_slide": end,
         "dpi": dpi,
-        "renderer": {"office": Path(str(soffice)).name, "rasterizer": Path(str(pdftoppm)).name},
+        "renderer": renderer_report,
         "pages": pages,
     }
     _write_json(destination / "render-report.json", report)
@@ -204,6 +330,7 @@ def main() -> int:
     parser.add_argument("--dpi", type=int, default=192)
     parser.add_argument("--first-slide", type=int)
     parser.add_argument("--last-slide", type=int)
+    parser.add_argument("--renderer", choices=("auto", "quicklook", "libreoffice"), default="auto")
     args = parser.parse_args()
     report = render_pptx_to_pngs(
         args.target,
@@ -211,6 +338,7 @@ def main() -> int:
         dpi=args.dpi,
         first_slide=args.first_slide,
         last_slide=args.last_slide,
+        renderer=args.renderer,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

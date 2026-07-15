@@ -26,6 +26,9 @@ def installed_command() -> Path | None:
 
 
 def installer_command() -> list[str]:
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "tool", "install", "--force", "--editable", str(BUNDLED_CLI)]
     if sys.version_info >= (3, 10):
         return [
             sys.executable,
@@ -36,9 +39,6 @@ def installer_command() -> list[str]:
             "--upgrade",
             str(BUNDLED_CLI),
         ]
-    uv = shutil.which("uv")
-    if uv:
-        return [uv, "tool", "install", "--force", "--editable", str(BUNDLED_CLI)]
     for executable_name in ("python3.13", "python3.12", "python3.11", "python3.10"):
         executable = shutil.which(executable_name)
         if executable:

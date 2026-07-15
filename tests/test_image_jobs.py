@@ -11,7 +11,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 from build_image_jobs import (  # noqa: E402
     JobError,
-    approve_calibration,
     build_image_jobs,
     execute_image_jobs,
 )
@@ -48,7 +47,7 @@ def write_run(root: Path, page_count: int = 2, families=None) -> Path:
 
 
 class ImageJobsTest(unittest.TestCase):
-    def test_builds_deterministic_target_then_reference_jobs(self) -> None:
+    def test_builds_deterministic_target_then_user_reference_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run_dir = write_run(Path(temp_dir) / "run")
 
@@ -58,9 +57,9 @@ class ImageJobsTest(unittest.TestCase):
             first = manifest["jobs"][0]
             second = manifest["jobs"][1]
             self.assertEqual(first["status"], "ready")
-            self.assertEqual(first["batch"], "calibration")
-            self.assertEqual(second["batch"], "scale")
-            self.assertEqual(second["calibration_anchor"], first["output"])
+            self.assertEqual(first["batch"], "direct")
+            self.assertEqual(second["batch"], "direct")
+            self.assertIsNone(second["calibration_anchor"])
             self.assertEqual(len(first["target_sha256"]), 64)
             self.assertEqual(len(first["reference_sha256"]), 64)
             self.assertEqual(len(first["prompt_sha256"]), 64)
@@ -93,22 +92,9 @@ class ImageJobsTest(unittest.TestCase):
             )
 
             build_image_jobs(run_dir)
-            execute_image_jobs(
-                run_dir,
-                phase="calibration",
-                command_prefix=[sys.executable, str(fake)],
-            )
-            with self.assertRaisesRegex(JobError, "calibration approval"):
-                execute_image_jobs(
-                    run_dir,
-                    phase="scale",
-                    command_prefix=[sys.executable, str(fake)],
-                )
-            approval = approve_calibration(run_dir)
-            self.assertEqual(set(approval["families"]), {"content"})
             manifest = execute_image_jobs(
                 run_dir,
-                phase="scale",
+                phase="calibration",
                 command_prefix=[sys.executable, str(fake)],
             )
 
@@ -122,20 +108,20 @@ class ImageJobsTest(unittest.TestCase):
             )
             self.assertTrue(all(job["status"] == "complete" for job in manifest["jobs"]))
             self.assertTrue(all(job["output_sha256"] for job in manifest["jobs"]))
-            scale = next(job for job in manifest["jobs"] if job["batch"] == "scale")
-            images = [scale["command"][i + 1] for i, value in enumerate(scale["command"]) if value == "--image"]
+            second = manifest["jobs"][1]
+            images = [second["command"][i + 1] for i, value in enumerate(second["command"]) if value == "--image"]
             self.assertEqual(
                 images,
                 [
-                    str(run_dir.resolve() / scale["target_image"]),
-                    str(run_dir.resolve() / "generated/page-001.png"),
+                    str(run_dir.resolve() / second["target_image"]),
+                    str(run_dir.resolve() / second["reference_image"]),
                 ],
             )
-            scale_prompt = (run_dir / scale["prompt_file"]).read_text(encoding="utf-8")
-            self.assertIn("approved calibration slide's layout skeleton", scale_prompt)
-            self.assertIn("Do not preserve the target's original visual layout", scale_prompt)
+            second_prompt = (run_dir / second["prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("locked reference slide", second_prompt)
+            self.assertNotIn("generated calibration", second_prompt)
 
-    def test_first_page_of_each_family_is_a_calibration_job(self) -> None:
+    def test_legacy_jobs_do_not_create_generated_calibration_anchors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run_dir = write_run(
                 Path(temp_dir) / "run",
@@ -150,11 +136,19 @@ class ImageJobsTest(unittest.TestCase):
                 batches,
                 [
                     (1, "cover", "direct"),
-                    (2, "content", "calibration"),
-                    (3, "content", "scale"),
+                    (2, "content", "direct"),
+                    (3, "content", "direct"),
                     (4, "table", "direct"),
                 ],
             )
+
+    def test_legacy_scale_execution_is_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = write_run(Path(temp_dir) / "run", page_count=1)
+            build_image_jobs(run_dir)
+
+            with self.assertRaisesRegex(JobError, "scale execution is disabled"):
+                execute_image_jobs(run_dir, phase="scale")
 
     def test_single_page_family_runs_directly_without_calibration_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -233,6 +227,16 @@ class ImageJobsTest(unittest.TestCase):
 
             with self.assertRaisesRegex(JobError, "already exists"):
                 build_image_jobs(run_dir)
+
+    def test_rejects_a_job_without_a_replaceable_editppt_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = write_run(Path(temp_dir) / "run", page_count=1)
+            manifest = build_image_jobs(run_dir)
+            manifest["jobs"][0]["command"][0] = "unexpected-image-tool"
+            (run_dir / "image-jobs.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(JobError, "no replaceable editppt executable"):
+                execute_image_jobs(run_dir, phase="calibration", command_prefix=[sys.executable, "fake.py"])
 
 
 if __name__ == "__main__":

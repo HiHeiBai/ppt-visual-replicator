@@ -42,6 +42,48 @@ def _copy_input_image(source: str | Path, destination: Path, role: str) -> dict[
     return {"path": str(image), "sha256": _sha256(image)}
 
 
+def _manifest_declares_generated_image(manifest_path: Path, image: Path) -> bool:
+    """Return whether a direct-run manifest identifies ``image`` as generated."""
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+
+    candidates = [manifest.get("generated_image")]
+    for page in manifest.get("pages", []):
+        if isinstance(page, dict):
+            candidates.append(page.get("generated_image"))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            if (manifest_path.parent / str(candidate)).resolve() == image:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def is_generated_run_artifact(image: Path) -> bool:
+    """Reject known generated, preview, and prior-run output files as references.
+
+    The pipeline does not try to infer the visual provenance of an arbitrary
+    external bitmap. It instead requires an explicit user-supplied declaration
+    and refuses every image that a direct run records as an output. Searching
+    ancestors also catches a deck-level ``deck-run.json`` when a page artifact
+    is passed by its nested path.
+    """
+    if image.name.lower() in {"generated.png", "preview.png"}:
+        return True
+    for directory in (image.parent, *image.parents):
+        for manifest_name in ("run.json", "deck-run.json"):
+            if _manifest_declares_generated_image(directory / manifest_name, image):
+                return True
+    return False
+
+
 def _require_slide(ledger: dict[str, Any], slide_number: int, role: str) -> None:
     available = {int(slide["slide_number"]) for slide in ledger.get("slides", [])}
     if slide_number not in available:
@@ -209,6 +251,7 @@ def prepare_direct_page(
     strict_text_protection: bool = False,
     reference_image: str | Path | Sequence[str | Path] | None = None,
     reference_slide: int | Sequence[int] | None = None,
+    reference_user_supplied: bool = False,
     style_brief: str | None = None,
     style_contract: str | Path | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -244,6 +287,11 @@ def prepare_direct_page(
 
         destination.mkdir(parents=True)
         reference_images = _as_reference_images(reference_image)
+        if reference_images and not reference_user_supplied:
+            raise DirectRunError(
+                "reference images require reference_user_supplied=True; generated or prior-run images "
+                "must never become style references"
+            )
         provided_slides = _as_reference_slides(reference_slide)
         if provided_slides and len(provided_slides) != len(reference_images):
             raise DirectRunError(
@@ -272,13 +320,21 @@ def prepare_direct_page(
 
         reference_inputs: list[dict[str, Any]] = []
         for index, (image, slide) in enumerate(zip(reference_images, reference_slides)):
+            resolved = Path(image).expanduser().resolve()
+            if is_generated_run_artifact(resolved):
+                raise DirectRunError(
+                    f"refusing generated slide as a style reference: {resolved}; use a user-supplied "
+                    "reference image or a JSON style contract instead"
+                )
             filename = (
                 "reference-style.png"
                 if len(reference_images) == 1
                 else f"reference-style-{index + 1:02d}.png"
             )
             info = _copy_input_image(image, destination / filename, f"reference {index + 1}")
-            reference_inputs.append({"image": filename, "source_slide": slide, **info})
+            reference_inputs.append(
+                {"image": filename, "source_slide": slide, "origin": "user-supplied", **info}
+            )
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
         raise
@@ -359,6 +415,11 @@ def main() -> int:
     )
     parser.add_argument("--reference-image", action="append")
     parser.add_argument("--reference-slide", action="append", type=int)
+    parser.add_argument(
+        "--reference-user-supplied",
+        action="store_true",
+        help="Required when passing a reference image; never use this for a generated or prior-run page.",
+    )
     parser.add_argument("--style-brief")
     parser.add_argument(
         "--style-contract",
@@ -375,6 +436,7 @@ def main() -> int:
         strict_text_protection=args.strict_text_protection,
         reference_image=args.reference_image,
         reference_slide=args.reference_slide,
+        reference_user_supplied=args.reference_user_supplied,
         style_brief=args.style_brief,
         style_contract=args.style_contract,
     )

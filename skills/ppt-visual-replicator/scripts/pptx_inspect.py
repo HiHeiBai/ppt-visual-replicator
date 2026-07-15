@@ -18,7 +18,8 @@ R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"p": P_NS, "a": A_NS, "r": R_NS, "rel": REL_NS}
 CRITICAL_TOKEN_RE = re.compile(
-    r"(?:HR|CI|OR|RR|P)\s*[=<>≤≥]?\s*\d+(?:\.\d+)?%?|\d+(?:\.\d+)?%|\d+(?:\.\d+)?",
+    r"(?:HR|CI|OR|RR|P|SD|SE|N|BETA|ALPHA)\s*[=<>≤≥]?\s*[-+]?\d+(?:\.\d+)?%?|"
+    r"\d+(?:\.\d+)?%|[-+]?\d+(?:\.\d+)?",
     re.IGNORECASE,
 )
 

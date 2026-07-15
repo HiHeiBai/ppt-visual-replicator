@@ -9,7 +9,7 @@ and font size stay pixel-accurate. Output: `paddle_hints.json` plus a labeled
 `paddle_hints.png` overlay on the source image.
 
 Requires network access and a token in the PADDLE_OCR_TOKEN environment
-variable (or --token). The built-in `editppt page hints` stays the offline
+variable. The built-in `editppt page hints` stays the offline
 default; this script is the content-aware alternative.
 """
 
@@ -177,14 +177,14 @@ def main() -> int:
     parser.add_argument("--source", default="source.png", help="Source image relative to the page directory.")
     parser.add_argument("--out", default="paddle_hints.json", help="Hints JSON relative to the page directory.")
     parser.add_argument("--overlay", default="paddle_hints.png", help="Labeled overlay image. Pass an empty string to skip.")
-    parser.add_argument("--token", default=os.environ.get("PADDLE_OCR_TOKEN", ""), help="API token; defaults to $PADDLE_OCR_TOKEN.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--timeout", type=int, default=300, help="Job polling timeout in seconds.")
     parser.add_argument("--min-glyph", type=int, default=6)
     args = parser.parse_args()
 
-    if not args.token:
-        raise SystemExit("Missing token: set PADDLE_OCR_TOKEN or pass --token.")
+    token = os.environ.get("PADDLE_OCR_TOKEN", "").strip()
+    if not token:
+        raise SystemExit("Missing token: set PADDLE_OCR_TOKEN in the environment.")
     page_dir = Path(args.page_dir).expanduser().resolve()
     source_path = page_dir / args.source
     if not source_path.exists():
@@ -192,7 +192,7 @@ def main() -> int:
 
     started = time.time()
     try:
-        pages = submit_and_fetch(source_path, args.token, args.model, args.timeout)
+        pages = submit_and_fetch(source_path, token, args.model, args.timeout)
     except RuntimeError as exc:
         raise SystemExit(str(exc))
     hints = build_page_hints(page_dir, pages[0], source_name=args.source, min_glyph=args.min_glyph)

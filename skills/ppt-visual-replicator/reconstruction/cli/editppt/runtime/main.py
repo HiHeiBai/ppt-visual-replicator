@@ -59,8 +59,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     argv = ["config"]
-    if args.api_key:
-        argv.extend(["--api-key", args.api_key])
+    if args.api_key_from_env:
+        argv.append("--api-key-from-env")
     if args.base_url:
         argv.extend(["--base-url", args.base_url])
     if args.clear_base_url:
@@ -69,8 +69,8 @@ def cmd_config(args: argparse.Namespace) -> int:
         argv.extend(["--model", args.model])
     if args.import_codex_ppt:
         argv.append("--import-codex-ppt")
-    if getattr(args, "paddle_ocr_token", None):
-        argv.extend(["--paddle-ocr-token", args.paddle_ocr_token])
+    if args.paddle_ocr_token_from_env:
+        argv.append("--paddle-ocr-token-from-env")
     return run_script("runtime_env.py", argv)
 
 
@@ -109,7 +109,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
-    argv = []
+    argv = ["--json"]
     if args.out_root:
         argv.extend(["--out-root", args.out_root])
     if args.job_dir:
@@ -121,20 +121,22 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     argv.extend(args.inputs)
     command = [sys.executable, str(RUNTIME_DIR / "prepare_deck_run.py"), *[str(item) for item in argv]]
     prepared = subprocess.run(command, text=True, capture_output=True)
-    if prepared.stdout:
-        print(prepared.stdout, end="")
     if prepared.stderr:
         print(prepared.stderr, end="", file=sys.stderr)
     if prepared.returncode != 0:
+        if prepared.stdout:
+            print(prepared.stdout, end="")
         return prepared.returncode
-    lines = [line.strip() for line in prepared.stdout.splitlines() if line.strip()]
-    if not lines:
-        print("prepare did not report a deck_manifest.json path", file=sys.stderr)
+    try:
+        preparation = json.loads(prepared.stdout)
+        deck_path = Path(str(preparation["deck_manifest"])).resolve()
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        print(f"prepare did not report valid JSON metadata: {exc}", file=sys.stderr)
         return 1
-    deck_path = Path(lines[0])
     if not deck_path.exists():
         print(f"prepare reported a missing deck_manifest.json path: {deck_path}", file=sys.stderr)
         return 1
+    print(json.dumps(preparation, ensure_ascii=False))
     if not getattr(args, "no_text_hints", False):
         # Best-effort: distribute per-page text measurements alongside the
         # page sources so workers start with hints already in place.
@@ -459,20 +461,20 @@ perform a network API probe by default.
         description="""Configure API fallback values used by editppt image commands.
 
 Values are written to ~/.editppt/config.yaml. Environment variables still win at
-runtime. API keys are masked in command output.
+runtime. Secrets are accepted only from environment variables, never CLI arguments.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Examples:
-  editppt config --api-key "your-api-key" --model gpt-image-2
-  editppt config --api-key "your-api-key" --base-url https://example.test/v1 --model openai/gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --model gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --base-url https://example.test/v1 --model openai/gpt-image-2
   editppt config --clear-base-url
 """,
     )
-    config.add_argument("--api-key", help="OpenAI or OpenAI-compatible API key to store.")
+    config.add_argument("--api-key-from-env", action="store_true", help="Store OPENAI_API_KEY from the environment without exposing it in process arguments.")
     config.add_argument("--base-url", help="OpenAI-compatible base URL, for example https://api.openai.com/v1.")
     config.add_argument("--clear-base-url", action="store_true", help="Remove OPENAI_BASE_URL from the config file.")
     config.add_argument("--model", help="Default image model for API fallback.")
-    config.add_argument("--paddle-ocr-token", metavar="TOKEN", help="PaddleOCR-VL token for content-aware text hints. Apply at https://aistudio.baidu.com/account/accessToken.")
+    config.add_argument("--paddle-ocr-token-from-env", action="store_true", help="Store PADDLE_OCR_TOKEN from the environment without exposing it in process arguments.")
     config.add_argument("--import-codex-ppt", action="store_true", help="Import compatible values from ~/.codex-ppt-skill/.env when present.")
     config.set_defaults(func=cmd_config)
 
@@ -659,7 +661,7 @@ PowerPoint, not an editable equation object.
     formula_render.add_argument("--preamble-file", metavar="FILE", help="Read extra LaTeX preamble from a file.")
     formula_render.add_argument("--dpi", type=int, default=300, metavar="N", help="PNG rasterization DPI.")
     formula_render.add_argument("--timeout", type=int, default=120, metavar="SEC", help="Render/conversion timeout in seconds.")
-    formula_render.add_argument("--shell-escape", action="store_true", help="Allow LaTeX shell escape. Keep off unless the formula package requires it.")
+    formula_render.add_argument("--shell-escape", action="store_true", help="DANGEROUS: permit trusted LaTeX to execute programs; also requires EDITPPT_ALLOW_SHELL_ESCAPE=1.")
     formula_render.add_argument("--keep-workdir", metavar="DIR", help="Copy the temporary TeX workdir here for debugging.")
     formula_render.add_argument("--fragment", metavar="FILE", help="Write a manifest image fragment for this formula.")
     formula_render.add_argument("--box", metavar="X,Y,W,H", help="Source-pixel placement box for --fragment.")
@@ -742,8 +744,8 @@ asset-sheet splitting inside page directories.
 
 Setup:
   codex login
-  editppt config --api-key "your-api-key" --model gpt-image-2
-  editppt config --api-key "your-api-key" --base-url https://example.test/v1 --model openai/gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --model gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --base-url https://example.test/v1 --model openai/gpt-image-2
 
 Parameter surface:
   generate/edit backend requests pass only model, prompt, size, and quality.

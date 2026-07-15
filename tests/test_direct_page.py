@@ -31,6 +31,7 @@ class DirectPageTest(unittest.TestCase):
                 source_image=source_image,
                 reference_image=reference_image,
                 reference_slide=3,
+                reference_user_supplied=True,
                 run_dir=root / "run",
             )
 
@@ -146,6 +147,7 @@ class DirectPageTest(unittest.TestCase):
                 source_image=source_image,
                 reference_image=references,
                 reference_slide=[7, 12],
+                reference_user_supplied=True,
                 run_dir=root / "run",
             )
 
@@ -175,6 +177,49 @@ class DirectPageTest(unittest.TestCase):
                     source_image=source_image,
                     reference_image=reference_image,
                     reference_slide=1,
+                    reference_user_supplied=True,
+                    run_dir=root / "run",
+                )
+
+    def test_rejects_reference_without_explicit_user_supplied_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = write_fixture_pptx(root / "target.pptx")
+            source_image = root / "source-content.png"
+            source_image.write_bytes(b"source-page-image")
+            reference_image = root / "reference-style.png"
+            reference_image.write_bytes(b"reference-page-image")
+
+            with self.assertRaisesRegex(DirectRunError, "reference_user_supplied=True"):
+                prepare_direct_page(
+                    target,
+                    target_slide=2,
+                    source_image=source_image,
+                    reference_image=reference_image,
+                    run_dir=root / "run",
+                )
+
+    def test_rejects_generated_output_even_when_marked_user_supplied(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = write_fixture_pptx(root / "target.pptx")
+            source_image = root / "source-content.png"
+            source_image.write_bytes(b"source-page-image")
+            prior_run = root / "prior-run"
+            prior_run.mkdir()
+            generated = prior_run / "generated.png"
+            generated.write_bytes(b"incorrect-generated-slide")
+            (prior_run / "run.json").write_text(
+                json.dumps({"generated_image": "generated.png"}), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(DirectRunError, "refusing generated slide"):
+                prepare_direct_page(
+                    target,
+                    target_slide=2,
+                    source_image=source_image,
+                    reference_image=generated,
+                    reference_user_supplied=True,
                     run_dir=root / "run",
                 )
 

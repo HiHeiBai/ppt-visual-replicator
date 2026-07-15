@@ -11,5 +11,7 @@ build/
 .env.*
 *.pptx
 *.pdf
+!tests/fixtures/**/*.pptx
+!tests/fixtures/**/*.pdf
 output/
 outputs/

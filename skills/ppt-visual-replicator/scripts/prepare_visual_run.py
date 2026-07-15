@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Deprecated compatibility workflow; do not use for new direct-deck runs."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +14,9 @@ from pptx_inspect import InputError, inspect_pptx
 
 class RunError(ValueError):
     pass
+
+
+RENDER_TIMEOUT_SECONDS = 300
 
 
 def parse_slide_selection(value: str) -> list[int]:
@@ -53,7 +57,7 @@ def _renderer_command(pptx: Path, output_dir: Path) -> dict[str, Any]:
         "output_dir": str(output_dir),
         "commands": [
             ["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(output_dir), str(pptx)],
-            ["pdftoppm", "-png", "-r", "150", "<converted.pdf>", str(output_dir / "slide")],
+            ["pdftoppm", "-png", "-r", "192", "<converted.pdf>", str(output_dir / "slide")],
         ],
     }
 
@@ -65,21 +69,29 @@ def _render_pptx(pptx: Path, output_dir: Path) -> None:
         missing = [name for name, value in (("soffice", soffice), ("pdftoppm", pdftoppm)) if not value]
         raise RunError(f"renderer command is unavailable: {', '.join(missing)}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(output_dir), str(pptx)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        subprocess.run(
+            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(output_dir), str(pptx)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=RENDER_TIMEOUT_SECONDS,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RunError(f"legacy PPTX-to-PDF rendering failed: {exc}") from exc
     pdf = output_dir / f"{pptx.stem}.pdf"
     if not pdf.is_file():
         raise RunError(f"renderer did not create PDF: {pdf}")
-    subprocess.run(
-        [pdftoppm, "-png", "-r", "150", str(pdf), str(output_dir / "slide")],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        subprocess.run(
+            [pdftoppm, "-png", "-r", "192", str(pdf), str(output_dir / "slide")],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=RENDER_TIMEOUT_SECONDS,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RunError(f"legacy PDF-to-PNG rendering failed: {exc}") from exc
     pages = sorted(
         output_dir.glob("slide-*.png"),
         key=lambda path: int(path.stem.rsplit("-", 1)[-1]),

@@ -181,6 +181,7 @@ def main():
     parser.add_argument("--out-root", default="output/image-to-editable-ppt")
     parser.add_argument("--job-dir")
     parser.add_argument("--dpi", type=int, default=180)
+    parser.add_argument("--json", action="store_true", help="Print one machine-readable preparation record.")
     parser.add_argument(
         "--max-concurrent-pages",
         type=int,
@@ -196,10 +197,19 @@ def main():
     if not (run_dir / "pages").exists():
         raise SystemExit(f"Input normalization did not create pages/: {run_dir}")
     deck = upgrade_deck_manifest(deck_path, args.max_concurrent_pages)
-    print(deck_path)
-    print(f"run_id={deck['run_id']}")
-    print(f"pages={deck['page_count']}")
-    print(f"max_concurrent_pages={deck['max_concurrent_pages']}")
+    payload = {
+        "deck_manifest": str(deck_path),
+        "run_id": deck["run_id"],
+        "pages": deck["page_count"],
+        "max_concurrent_pages": deck["max_concurrent_pages"],
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(deck_path)
+        print(f"run_id={deck['run_id']}")
+        print(f"pages={deck['page_count']}")
+        print(f"max_concurrent_pages={deck['max_concurrent_pages']}")
 
 
 if __name__ == "__main__":

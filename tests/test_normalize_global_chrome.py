@@ -83,6 +83,38 @@ class NormalizeGlobalChromeTest(unittest.TestCase):
             self.assertEqual(footer["font_size"], 11.0)
             self.assertEqual(first["warnings"], [])
 
+    def test_scales_chrome_independently_for_four_by_three_slides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run = root / "run"
+            page = run / "pages" / "page_001"
+            page.mkdir(parents=True)
+            marker = root / "marker.png"
+            marker.write_bytes(b"marker")
+            (page / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "source": {"width_px": 1600, "height_px": 1200},
+                        "text_boxes": [],
+                        "shapes": [],
+                        "images": [],
+                        "asset_provenance": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config_path = root / "chrome.json"
+            config_path.write_text(
+                json.dumps({"page_range": [1, 1], "page_marker": {"asset": str(marker)}}),
+                encoding="utf-8",
+            )
+
+            normalize_run(run, config_path)
+            normalized = json.loads((page / "manifest.json").read_text(encoding="utf-8"))
+            marker_box = normalized["images"][-1]["box_px"]
+
+            self.assertEqual(marker_box, [26.7, 1110.6, 58.3, 58.3])
+
 
 if __name__ == "__main__":
     unittest.main()

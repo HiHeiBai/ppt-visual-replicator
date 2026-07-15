@@ -40,7 +40,7 @@ FOREGROUND_TERMS = {
     "illustration",
     "image block",
     "logo",
-    "mark",
+    "brand mark",
     "photo",
     "pictogram",
     "screenshot",

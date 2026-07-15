@@ -60,8 +60,8 @@ Backend selection:
 
 Setup:
   codex login
-  editppt config --api-key "your-api-key" --model gpt-image-2
-  editppt config --api-key "your-api-key" --base-url https://example.test/v1 --model openai/gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --model gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --base-url https://example.test/v1 --model openai/gpt-image-2
 
 Input image rules:
   generate creates a new image from prompt only.
@@ -423,12 +423,12 @@ def _ensure_api_key(dry_run: bool) -> None:
     model = _default_model()
     if base_url:
         command = (
-            'editppt config --api-key "your-api-key" '
+            'OPENAI_API_KEY=... editppt config --api-key-from-env '
             f'--base-url "{base_url}" --model {model}'
         )
         target_hint = f"Detected third-party OpenAI-compatible API via OPENAI_BASE_URL={base_url}."
     else:
-        command = f'editppt config --api-key "your-api-key" --model {model}'
+        command = f"OPENAI_API_KEY=... editppt config --api-key-from-env --model {model}"
         target_hint = "Detected official OpenAI API mode because OPENAI_BASE_URL is not set."
     _die(
         "Neither Codex OAuth nor OPENAI_API_KEY is available for editppt image generation.\n"
@@ -544,9 +544,12 @@ def _print_request(payload: dict) -> None:
 
 
 def _decode_and_write(images: List[str], outputs: List[Path], force: bool) -> None:
+    if len(images) != len(outputs):
+        _die(
+            f"Image backend returned {len(images)} images but this command requested {len(outputs)} output path(s); "
+            "refusing to silently discard generated images."
+        )
     for idx, image_b64 in enumerate(images):
-        if idx >= len(outputs):
-            break
         if len(image_b64) > MAX_CODEX_BASE64_CHARS:
             _die("Image payload exceeded size limit.")
         out_path = outputs[idx]

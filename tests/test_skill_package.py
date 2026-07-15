@@ -41,6 +41,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("--reference-slide", text)
         self.assertIn("--source-image", text)
         self.assertIn("--reference-image", text)
+        self.assertIn("--reference-user-supplied", text)
         self.assertIn("--style-brief", text)
         self.assertIn("--strict-text-protection", text)
         self.assertIn("--speed-profile balanced", text)
@@ -59,6 +60,8 @@ class SkillPackageTest(unittest.TestCase):
         self.assertNotIn("build_visual_plan.py", text)
         self.assertNotIn("--execute-phase calibration", text)
         self.assertNotIn("--approve-calibration", text)
+        self.assertIn("must never acquire a pie/donut/bar/line chart", text)
+        self.assertIn("Never feed `generated.png`", text)
 
     def test_skill_documents_glyph_preflight(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")

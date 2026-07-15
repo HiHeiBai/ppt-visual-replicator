@@ -6,26 +6,50 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from pptx_inspect import InputError, inspect_pptx
+from validate_editable_delivery import validate_editable_delivery
 
 
 class FinalRenderError(RuntimeError):
     pass
 
 
+def _png_size(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        raise FinalRenderError(f"final render did not create a readable PNG: {path}")
+    return struct.unpack(">II", header[16:24])
+
+
 def render_final_pptx(
     pptx: str | Path,
     out_dir: str | Path,
     *,
-    dpi: int = 120,
+    dpi: int = 192,
+    run_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     source = Path(pptx).expanduser().resolve()
     destination = Path(out_dir).expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != ".pptx":
         raise FinalRenderError(f"final PPTX does not exist: {source}")
+    try:
+        source_ledger = inspect_pptx(source)
+    except InputError as exc:
+        raise FinalRenderError(f"final PPTX is not inspectable: {exc}") from exc
+    expected_aspect = float(source_ledger["slide_size"]["aspect_ratio"])
+    if run_dir is not None:
+        delivery_gate = validate_editable_delivery(run_dir, source)
+        if delivery_gate.get("passed") is not True:
+            details = "; ".join(delivery_gate.get("errors", []))
+            raise FinalRenderError(
+                "refusing final-render QA before the editable-delivery gate passes: " + details
+            )
     if destination.exists():
         raise FinalRenderError(f"output directory already exists: {destination}")
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
@@ -60,11 +84,24 @@ def render_final_pptx(
     slides = sorted(destination.glob("slide-*.png"), key=lambda path: int(path.stem.split("-")[-1]))
     if not slides:
         raise FinalRenderError("final rendering created no slide images")
+    rendered_sizes: dict[str, list[int]] = {}
+    for slide in slides:
+        width, height = _png_size(slide)
+        if height <= 0 or abs((width / height) - expected_aspect) / expected_aspect > 0.01:
+            raise FinalRenderError(
+                f"final slide has the wrong aspect ratio: {slide.name} is {width}x{height}, "
+                f"expected {expected_aspect:.4f}"
+            )
+        rendered_sizes[slide.name] = [width, height]
     report = {
         "pptx": str(source),
         "output_dir": str(destination),
         "slide_count": len(slides),
         "slides": [path.name for path in slides],
+        "rendered_sizes_px": rendered_sizes,
+        "expected_aspect_ratio": expected_aspect,
+        "dpi": int(dpi),
+        "editable_delivery_gate": "passed" if run_dir is not None else "not-requested",
     }
     (destination / "render-report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -76,9 +113,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Render only a finalized PPTX for visual QA.")
     parser.add_argument("--pptx", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--dpi", type=int, default=120)
+    parser.add_argument("--dpi", type=int, default=192)
+    parser.add_argument(
+        "--run-dir",
+        help="Direct visual-replicator run directory. When supplied, rejects screenshot-only or unfinished reconstructions.",
+    )
     args = parser.parse_args()
-    print(json.dumps(render_final_pptx(args.pptx, args.out_dir, dpi=args.dpi), ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            render_final_pptx(args.pptx, args.out_dir, dpi=args.dpi, run_dir=args.run_dir),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

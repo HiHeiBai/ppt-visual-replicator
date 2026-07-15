@@ -31,9 +31,12 @@ def process_asset_sheet(args, page_dir):
     chroma = resolve_under_page(page_dir, args.chroma)
     alpha = resolve_under_page(page_dir, args.alpha)
     if not args.asset_sheet_source and not chroma.exists() and not alpha.exists():
-        return
+        raise SystemExit(
+            "No asset sheet input exists. Supply --asset-sheet-source or provide an existing "
+            f"chroma/alpha file ({chroma} or {alpha})."
+        )
     if not args.asset_sheet_source and args.skip_chroma and args.skip_split:
-        return
+        raise SystemExit("Nothing to process: --skip-chroma and --skip-split cannot be used together without an input action.")
 
     if args.asset_sheet_source:
         source = resolve_under_page(page_dir, args.asset_sheet_source)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -53,6 +54,11 @@ def render_latex_asset(
 ) -> dict[str, Any]:
     if not tex.strip():
         raise FormulaRenderError("LaTeX input is empty.")
+    if shell_escape and os.environ.get("EDITPPT_ALLOW_SHELL_ESCAPE") != "1":
+        raise FormulaRenderError(
+            "LaTeX shell escape is disabled by default because it can execute programs. "
+            "For trusted TeX only, set EDITPPT_ALLOW_SHELL_ESCAPE=1 and rerun."
+        )
     out_path = resolve_output_path(out, page_dir)
     fmt = normalise_format(output_format, out_path)
     source_tex = out_path.with_suffix(".tex")

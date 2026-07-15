@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Deprecated compatibility image-job runner; direct-deck runs use built-in imagegen."""
 from __future__ import annotations
 
 import argparse
@@ -29,12 +30,7 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _prompt(page: dict[str, Any], batch: str) -> str:
-    if batch == "scale":
-        authority = """The first image is the target slide and is the edit target and content authority.
-The second image is the approved generated calibration slide for this page family and is the layout and visual-style authority. Reuse the approved calibration slide's layout skeleton, title placement, margins, content containers, footer position, palette, decorative density, and recurring chrome. Map the target's logical content groups into that skeleton. Do not preserve the target's original visual layout. Change the calibration skeleton only when target content has a genuinely different number or type of logical groups, and keep the same deck-level geometry when adapting it.
-"""
-    else:
-        authority = f"""The first image is target slide {page['target_slide']} and is the edit target and content authority.
+    authority = f"""The first image is target slide {page['target_slide']} and is the edit target and content authority.
 The second image is locked reference slide {page['reference_slide']} and is visual-style authority only.
 """
     return f"""Redesign one complete 16:9 presentation slide.
@@ -65,21 +61,13 @@ def build_image_jobs(
     prompts_dir.mkdir(exist_ok=True)
     generated_dir.mkdir(exist_ok=True)
 
-    first_by_family: dict[str, int] = {}
-    family_page_counts: dict[str, int] = {}
-    for page in plan.get("pages", []):
-        family = str(page.get("target_family", "content"))
-        first_by_family.setdefault(family, int(page["target_slide"]))
-        family_page_counts[family] = family_page_counts.get(family, 0) + 1
-
     jobs = []
     for page in plan.get("pages", []):
         slide_number = int(page["target_slide"])
         family = str(page.get("target_family", "content"))
-        if family_page_counts[family] == 1:
-            batch = "direct"
-        else:
-            batch = "calibration" if first_by_family[family] == slide_number else "scale"
+        # Preserve this deprecated runner for compatibility, but never reuse a
+        # generated page as a later imagegen input.
+        batch = "direct"
         target_rel = str(page["target_image"])
         reference_rel = str(page["reference_image"])
         target = root / target_rel
@@ -91,11 +79,7 @@ def build_image_jobs(
 
         prompt_rel = f"prompts/page-{slide_number:03d}.txt"
         output_rel = f"generated/page-{slide_number:03d}.png"
-        calibration_rel = (
-            None
-            if batch != "scale"
-            else f"generated/page-{first_by_family[family]:03d}.png"
-        )
+        calibration_rel = None
         prompt_path = root / prompt_rel
         output_path = root / output_rel
         if output_path.exists() and not force:
@@ -108,11 +92,7 @@ def build_image_jobs(
             "--image",
             str(target),
         ]
-        command.extend(
-            ["--image", str(root / calibration_rel)]
-            if calibration_rel
-            else ["--image", str(reference)]
-        )
+        command.extend(["--image", str(reference)])
         command.extend(
             [
                 "--prompt-file",
@@ -153,7 +133,7 @@ def build_image_jobs(
 
     manifest = {
         "schema": "ppt_visual_image_jobs.v2",
-        "execution_mode": "serial_direct_or_calibration_then_scale",
+        "execution_mode": "serial_direct_user_references_only",
         "executed_phases": [],
         "calibration_approval": "calibration-approved.json",
         "jobs": jobs,
@@ -224,6 +204,11 @@ def execute_image_jobs(
 ) -> dict[str, Any]:
     if phase not in {"calibration", "scale"}:
         raise JobError(f"unsupported image execution phase: {phase}")
+    if phase == "scale":
+        raise JobError(
+            "deprecated scale execution is disabled because it can feed a generated calibration page "
+            "back into imagegen; rebuild jobs with user references only"
+        )
     root = Path(run_dir).expanduser().resolve()
     manifest = _load_jobs(root)
     approval = _validated_approval(root) if phase == "scale" else None
@@ -247,7 +232,16 @@ def execute_image_jobs(
         output_path = root / str(job["output"])
         if output_path.exists() and not force:
             raise JobError(f"generated page already exists: {output_path}")
-        command = prefix + list(job["command"])[1:]
+        original = [str(part) for part in job["command"]]
+        if not original:
+            raise JobError(f"image job has no command: {job.get('id', 'unknown')}")
+        try:
+            executable_index = original.index("editppt")
+        except ValueError as exc:
+            raise JobError(
+                f"image job has no replaceable editppt executable: {job.get('job_id', 'unknown')}"
+            ) from exc
+        command = [*original[:executable_index], *prefix, *original[executable_index + 1 :]]
         if force:
             command.append("--force")
         last_error: OSError | subprocess.CalledProcessError | None = None

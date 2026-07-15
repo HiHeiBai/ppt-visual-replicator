@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from pptx_inspect import InputError, inspect_pptx
-from prepare_direct_page import DirectRunError, prepare_direct_page
+from prepare_direct_page import DirectRunError, is_generated_run_artifact, prepare_direct_page
 from render_source_pages import SourceRenderError, render_pptx_to_pngs
 
 
@@ -63,6 +63,7 @@ def _request_contract(
     *,
     reference_image: str | Path | Sequence[str | Path] | None,
     reference_slide: int | Sequence[int] | None,
+    reference_user_supplied: bool,
     style_brief: str | None,
     source_dpi: int,
     strict_text_protection: bool,
@@ -71,6 +72,11 @@ def _request_contract(
     style_contract: str | Path | None,
 ) -> dict[str, Any]:
     reference_images = _as_reference_images(reference_image)
+    if reference_images and not reference_user_supplied:
+        raise DirectDeckError(
+            "reference images require --reference-user-supplied; generated or prior-run images "
+            "must never become style references"
+        )
     reference_slides = _as_reference_slides(reference_slide)
     if reference_slides and len(reference_slides) != len(reference_images):
         raise DirectDeckError(
@@ -81,11 +87,17 @@ def _request_contract(
         path = Path(image).expanduser().resolve()
         if path.suffix.lower() != ".png" or not path.is_file() or not path.stat().st_size:
             raise DirectDeckError(f"reference image must be a readable PNG: {path}")
+        if is_generated_run_artifact(path):
+            raise DirectDeckError(
+                f"refusing generated or preview output as a style reference: {path}; "
+                "use a user-supplied reference image or a JSON style contract instead"
+            )
         reference_inputs.append(
             {
                 "path": str(path),
                 "sha256": _sha256(path),
                 "source_slide": reference_slides[index] if reference_slides else None,
+                "origin": "user-supplied",
             }
         )
     contract = {
@@ -97,6 +109,7 @@ def _request_contract(
         "full_page_imagegen": bool(full_page_imagegen),
         "style_contract": None,
         "references": reference_inputs,
+        "reference_user_supplied": bool(reference_user_supplied),
     }
     if style_contract is not None:
         path = Path(style_contract).expanduser().resolve()
@@ -275,6 +288,7 @@ def prepare_direct_deck(
     *,
     reference_image: str | Path | Sequence[str | Path] | None = None,
     reference_slide: int | Sequence[int] | None = None,
+    reference_user_supplied: bool = False,
     style_brief: str | None = None,
     source_dpi: int = 192,
     strict_text_protection: bool = False,
@@ -297,6 +311,7 @@ def prepare_direct_deck(
         ledger,
         reference_image=reference_image,
         reference_slide=reference_slide,
+        reference_user_supplied=reference_user_supplied,
         style_brief=style_brief,
         source_dpi=source_dpi,
         strict_text_protection=strict_text_protection,
@@ -349,6 +364,7 @@ def prepare_direct_deck(
                 source_image=page["path"],
                 reference_image=reference_image,
                 reference_slide=reference_slide,
+                reference_user_supplied=reference_user_supplied,
                 style_brief=style_brief,
                 style_contract=style_contract,
                 strict_text_protection=strict_text_protection,
@@ -430,6 +446,11 @@ def main() -> int:
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--reference-image", action="append")
     parser.add_argument("--reference-slide", action="append", type=int)
+    parser.add_argument(
+        "--reference-user-supplied",
+        action="store_true",
+        help="Required when passing a reference image; never use this for a generated or prior-run page.",
+    )
     parser.add_argument("--style-brief")
     parser.add_argument(
         "--style-contract",
@@ -459,6 +480,7 @@ def main() -> int:
         args.run_dir,
         reference_image=args.reference_image,
         reference_slide=args.reference_slide,
+        reference_user_supplied=args.reference_user_supplied,
         style_brief=args.style_brief,
         source_dpi=args.source_dpi,
         strict_text_protection=args.strict_text_protection,

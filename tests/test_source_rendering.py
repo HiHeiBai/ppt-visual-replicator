@@ -83,6 +83,7 @@ class SourceRenderingTest(unittest.TestCase):
                 last_slide=3,
                 runner=fake_runner,
                 tool_lookup=lambda name: f"/fake/{name}",
+                renderer="libreoffice",
             )
 
             self.assertEqual(report["deck_slide_count"], 4)
@@ -90,6 +91,34 @@ class SourceRenderingTest(unittest.TestCase):
             self.assertEqual([page["slide_number"] for page in report["pages"]], [2, 3])
             self.assertTrue((root / "source-pages" / "slide-002.png").is_file())
             self.assertTrue((root / "source-pages" / "render-report.json").is_file())
+
+    def test_direct_deck_rejects_a_generated_reference_before_rendering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = write_fixture_pptx(root / "target.pptx")
+            prior_run = root / "prior-run"
+            prior_run.mkdir()
+            generated = prior_run / "generated.png"
+            generated.write_bytes(b"incorrect-generated-slide")
+            (prior_run / "run.json").write_text(
+                json.dumps({"generated_image": "generated.png"}), encoding="utf-8"
+            )
+            rendered = False
+
+            def renderer(*_args, **_kwargs):
+                nonlocal rendered
+                rendered = True
+                raise AssertionError("source rendering must not start")
+
+            with self.assertRaisesRegex(Exception, "refusing generated or preview output"):
+                prepare_direct_deck(
+                    target,
+                    root / "deck-run",
+                    reference_image=generated,
+                    reference_user_supplied=True,
+                    renderer=renderer,
+                )
+            self.assertFalse(rendered)
 
     def test_reports_missing_render_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -102,6 +131,34 @@ class SourceRenderingTest(unittest.TestCase):
                     root / "source-pages",
                     tool_lookup=lambda _name: None,
                 )
+
+    def test_quicklook_path_renders_the_selected_pptx_slide_directly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = write_fixture_pptx(root / "target.pptx")
+            commands: list[list[str]] = []
+
+            def fake_runner(command, **_kwargs):
+                commands.append([str(value) for value in command])
+                output_dir = Path(command[command.index("-o") + 1])
+                write_png_header(output_dir / "rendered.png")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            report = render_pptx_to_pngs(
+                target,
+                root / "source-pages",
+                first_slide=2,
+                last_slide=2,
+                renderer="quicklook",
+                runner=fake_runner,
+                tool_lookup=lambda name: "/fake/qlmanage" if name == "qlmanage" else None,
+            )
+
+            self.assertEqual(report["renderer"]["engine"], "quicklook")
+            self.assertEqual(report["renderer"]["mode"], "direct-pptx-to-png")
+            self.assertEqual(report["pages"][0]["slide_number"], 2)
+            self.assertIn("-t", commands[0])
+            self.assertNotIn("--convert-to", commands[0])
 
     def test_direct_page_auto_renders_when_source_image_is_omitted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

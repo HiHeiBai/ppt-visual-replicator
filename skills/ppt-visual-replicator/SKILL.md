@@ -58,7 +58,7 @@ python3 scripts/prepare_direct_deck.py \
   --speed-profile balanced
 ```
 
-Add `--style-brief`, repeated `--reference-image`, or repeated `--reference-slide` only when supplied by the user.
+Add `--style-brief`, repeated `--reference-image`, or repeated `--reference-slide` only when supplied by the user. Every image reference also requires `--reference-user-supplied`; generated pages, previews, prior-run outputs, and any derivative of them are forbidden as imagegen references.
 
 When the requested design has a fixed named system or exact cross-page colors, add `--style-contract "style-contract.json"`. This contract is copied into the run and embedded in every page prompt; a reference slide is never enough to guarantee consistent tones by itself.
 
@@ -96,7 +96,7 @@ Use `prepare_direct_deck.py` only as a thin deck wrapper: render once, call the 
 
 Read `generation-plan.json` and obey each page action:
 
-- `generate`: send `source-content.png` first, then shared `reference-style*.png` files, use `direct-image-prompt.txt`, and save one complete 16:9 `generated.png`.
+- `generate`: send `source-content.png` first, then only the immutable user-supplied `reference-style*.png` files, use `direct-image-prompt.txt`, and save one complete 16:9 `generated.png`.
 - `direct-rebuild`: skip whole-slide imagegen. Rebuild from `source-content.png` with the shared deck style kit.
 - `reuse`: do not generate. Reuse the declared canonical slide.
 
@@ -120,9 +120,9 @@ python3 scripts/record_generation_review.py \
 
 Every `generate` page needs its own accepted `generation-review.json`. `scripts/stage_reconstruction_inputs.py` invokes `scripts/validate_generation_delivery.py` and rejects the whole deck if a page has no review, if the image changed after review, or if any of the four checks is missing. Never bypass this gate by calling `editppt prepare` on hand-staged images.
 
-For a deck without supplied references, generate one representative content page first and reuse that successful generated page as a shared style anchor for later pages. Add at most one or two successful early pages when different content structures need examples. Do not pair anchors page-by-page.
+For a deck without supplied references, use the deck-level style contract and style brief for every page. Never feed `generated.png`, a preview, a reconstruction artifact, or any previous output back into imagegen as a style anchor. A generated page may be reviewed and reconstructed only; it is never a new generation input.
 
-Before page reconstruction, populate `shared-assets/index.json` from the successful representative pages. Separate each recurring logo, mascot, planet, decorative mark, or repeated chrome element once. Page workers must reuse an exact matching shared asset before making a page-local image request.
+Before page reconstruction, populate `shared-assets/index.json` only from user-supplied source/design assets or accepted reconstruction extracts. Separate each recurring logo, mascot, planet, decorative mark, or repeated chrome element once. Reuse those assets during editable rebuild; they must never become a later imagegen input.
 
 ### 4. Rebuild editable PowerPoint
 

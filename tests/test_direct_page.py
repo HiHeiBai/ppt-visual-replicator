@@ -31,6 +31,7 @@ class DirectPageTest(unittest.TestCase):
                 source_image=source_image,
                 reference_image=reference_image,
                 reference_slide=3,
+                reference_user_supplied=True,
                 run_dir=root / "run",
             )
 
@@ -146,6 +147,7 @@ class DirectPageTest(unittest.TestCase):
                 source_image=source_image,
                 reference_image=references,
                 reference_slide=[7, 12],
+                reference_user_supplied=True,
                 run_dir=root / "run",
             )
 

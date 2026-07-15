@@ -57,6 +57,36 @@ def validate_page_contract(paths):
         )
 
 
+def validate_direct_visual_gate(run_dir, page, page_dir, page_pptx):
+    """Require an original-source Quick Look comparison for direct deck runs."""
+    direct_root = run_dir.parent
+    deck_run_path = direct_root / "deck-run.json"
+    if not deck_run_path.is_file():
+        return None
+    direct_run = read_json(deck_run_path)
+    direct_pages = direct_run.get("pages") or []
+    page_index = int(page.get("page_index") or 0)
+    if page_index <= 0 or page_index > len(direct_pages):
+        raise SystemExit("direct-run page metadata is incomplete; cannot verify the original-source visual gate")
+    direct_page = direct_pages[page_index - 1]
+    source = direct_root / str(direct_page.get("source_image") or "")
+    gate_path = page_dir / "visual-gate.json"
+    if not source.is_file():
+        raise SystemExit(f"direct-run original source is missing for visual gate: {source}")
+    if not gate_path.is_file():
+        raise SystemExit(
+            f"{page['page_id']} has no visual-gate.json. Run verify_page_visual.py against the original source before recording."
+        )
+    gate = read_json(gate_path)
+    if gate.get("passed") is not True or gate.get("manual_accept") is not True:
+        raise SystemExit(f"{page['page_id']} visual gate did not pass; fix visible drift before recording")
+    if gate.get("source_sha256") != sha256_file(source):
+        raise SystemExit(f"{page['page_id']} visual gate used a stale or wrong original source")
+    if gate.get("page_pptx_sha256") != sha256_file(page_pptx):
+        raise SystemExit(f"{page['page_id']} visual gate does not match the current page.pptx")
+    return {"path": rel_to_run(run_dir, gate_path), "sha256": sha256_file(gate_path)}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Record and verify a page reconstruction result.")
     parser.add_argument("run", help="Run directory or deck_manifest.json")
@@ -102,6 +132,7 @@ def main():
         )
     paths = {key: output_path(page_dir, result, key, default) for key, default in REQUIRED_OUTPUTS.items()}
     validate_page_contract(paths)
+    visual_gate = validate_direct_visual_gate(run_dir, page, page_dir, paths["page_pptx"])
     hashes = {key: sha256_file(path) for key, path in paths.items()}
     page["result"] = {
         "agent_id": args.agent_id,
@@ -110,6 +141,7 @@ def main():
         "outputs": {key: rel_to_run(run_dir, path) for key, path in paths.items()},
         "hashes": hashes,
         "validation_passed": validation_passed,
+        "visual_gate": visual_gate,
     }
     page["status"] = "recorded"
     update_jobs_run_status(jobs)

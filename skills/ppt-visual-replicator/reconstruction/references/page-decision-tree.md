@@ -282,6 +282,7 @@ Every failed self-check item above is a current-page fix, owned by the page auth
 - The input cannot be normalized.
 - The page lacks a buildable `manifest.json`/`page.pptx`, or the PPTX cannot be opened.
 - Text font size or position visibly deviates from the source and causes crowding, overflow, or occlusion.
+- For a direct-redraw run, the original-source Quick Look visual gate is missing, fails its metrics, or shows a visible change to major background/chrome geometry, title wrapping, or text placement.
 
 May ship as recorded warnings with the current PPT — but only after the required object-source workflow has succeeded:
 

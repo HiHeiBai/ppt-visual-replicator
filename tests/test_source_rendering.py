@@ -135,6 +135,7 @@ class SourceRenderingTest(unittest.TestCase):
             manifest = prepare_direct_deck(
                 target,
                 root / "deck-run",
+                force_reconstruct=True,
                 renderer=renderer,
             )
 

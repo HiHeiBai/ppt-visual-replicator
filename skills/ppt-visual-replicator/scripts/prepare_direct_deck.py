@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from pptx_inspect import InputError, inspect_pptx
+from check_native_editability import assess_native_editability
+from extract_title_styles import extract_title_styles
 from prepare_direct_page import DirectRunError, is_generated_run_artifact, prepare_direct_page
-from render_source_pages import SourceRenderError, render_pptx_to_pngs
+from render_source_pages import SourceRenderError, _write_single_slide_pptx, render_pptx_to_pngs
 
 
 class DirectDeckError(RuntimeError):
@@ -302,6 +304,7 @@ def prepare_direct_deck(
     full_page_imagegen: bool = False,
     style_contract: str | Path | None = None,
     source_renderer: str = "auto",
+    force_reconstruct: bool = False,
     resume: bool = False,
     renderer: Callable[..., dict[str, Any]] = render_pptx_to_pngs,
 ) -> dict[str, Any]:
@@ -319,6 +322,23 @@ def prepare_direct_deck(
         ledger = inspect_pptx(target)
     except InputError as exc:
         raise DirectDeckError(str(exc)) from exc
+
+    # A fully native deck is already the correct editable deliverable.  Do
+    # not pass it through image generation merely because this command was
+    # invoked: imagegen redraw is visually lossy and cannot improve the source
+    # when no restyle was requested.  A caller may opt in to reconstruction
+    # only with an explicit force flag.
+    try:
+        native_check = assess_native_editability(target, target_slide)
+    except InputError as exc:
+        raise DirectDeckError(str(exc)) from exc
+    has_restyle_request = bool(reference_image or style_brief or style_contract)
+    title_styles = extract_title_styles(target, target_slide)
+    preserve_native = bool(
+        native_check["preserve_recommended"]
+        and not force_reconstruct
+        and not has_restyle_request
+    )
     if target_slide is not None:
         available = {int(slide["slide_number"]) for slide in ledger["slides"]}
         if target_slide not in available:
@@ -352,7 +372,36 @@ def prepare_direct_deck(
         return _refresh_resume_status(destination, manifest)
 
     destination.mkdir(parents=True)
+    if preserve_native:
+        final = destination / "reconstruction" / "final" / "origin_edited.pptx"
+        final.parent.mkdir(parents=True)
+        if target_slide is None:
+            shutil.copy2(Path(ledger["path"]), final)
+        else:
+            _write_single_slide_pptx(Path(ledger["path"]), final, target_slide)
+        _write_json(destination / "native-editability.json", native_check)
+        _write_json(destination / "title-styles.json", title_styles)
+        manifest = {
+            "schema": "ppt_visual_direct_deck.v3",
+            "status": "native-source-preserved",
+            "target_pptx": ledger["path"],
+            "target_sha256": ledger["sha256"],
+            "slide_count": int(native_check["selected_slide_count"]),
+            "target_slide_numbers": list(native_check["selected_slide_numbers"]),
+            "native_editability": "native-editability.json",
+            "title_styles": "title-styles.json",
+            "native_source_preserved": {
+                "output": "reconstruction/final/origin_edited.pptx",
+                "sha256": _sha256(final),
+                "reason": native_check["reason"],
+            },
+            "next_action": "Open the preserved output in macOS Quick Look and deliver it; do not start image generation or reconstruction.",
+        }
+        _write_json(destination / "deck-run.json", manifest)
+        return manifest
     try:
+        _write_json(destination / "native-editability.json", native_check)
+        _write_json(destination / "title-styles.json", title_styles)
         # Quick Look is more faithful for an individual slide, but it creates
         # a complete temporary PPTX and launches once per page. For a fast
         # deck run, use the already-supported one-pass LibreOffice/PDF route
@@ -482,6 +531,7 @@ def prepare_direct_deck(
         "source_ledger": "source-ledger.json",
         "source_render_dir": "source-pages",
         "source_render_report": "source-pages/render-report.json",
+        "title_styles": "title-styles.json",
         "generation_plan": "generation-plan.json",
         "shared_assets": "shared-assets/index.json",
         "generation_summary": generation_plan["summary"],
@@ -535,6 +585,11 @@ def main() -> int:
         help="Redraw every unique slide as one complete imagegen page.",
     )
     parser.add_argument(
+        "--force-reconstruct",
+        action="store_true",
+        help="Bypass native-source preservation only when a reconstruction is explicitly required.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Reuse a matching existing run directory and completed generated.png files.",
@@ -554,6 +609,7 @@ def main() -> int:
         full_page_imagegen=args.full_page_imagegen,
         style_contract=args.style_contract,
         source_renderer=args.source_renderer,
+        force_reconstruct=args.force_reconstruct,
         resume=args.resume,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

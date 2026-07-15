@@ -1,4 +1,4 @@
 interface:
   display_name: "PPT Visual Replicator"
-  short_description: "Quickly redraw a PPTX as an editable presentation"
-  default_prompt: "Use $ppt-visual-replicator to recreate this target PPTX through original-page screenshot → built-in imagegen redraw → PNG → editable PPTX. Work locally one page at a time, preserve all content, and return only the final editable deck."
+  short_description: "Preserve native PPTs or recreate them accurately"
+  default_prompt: "Use $ppt-visual-replicator to inspect this target PPTX first; preserve it if it is already natively editable, otherwise use original-page screenshot → built-in imagegen redraw → PNG → editable PPTX and require a Quick Look original-source visual gate for every page."

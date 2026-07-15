@@ -10,6 +10,7 @@ native source text survives in editable final-slide objects.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,14 @@ class EditableDeliveryError(RuntimeError):
 
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _normalize(value: str) -> str:
@@ -47,6 +56,59 @@ def validate_editable_delivery(run_dir: str | Path, pptx: str | Path) -> dict[st
     deck_run = root / "deck-run.json"
     source_ledger = root / "source-ledger.json"
     reconstruction = root / "reconstruction"
+    if deck_run.is_file():
+        try:
+            direct_manifest = json.loads(deck_run.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            direct_manifest = {}
+            errors.append(f"direct run manifest is unreadable: {exc}")
+        native_delivery = direct_manifest.get("native_source_preserved")
+        if native_delivery:
+            expected = root / str(native_delivery.get("output") or "")
+            evidence["text_validation_mode"] = "native-source-preserved"
+            if candidate != expected.resolve():
+                errors.append(
+                    "candidate PPTX is not the preserved native source artifact: "
+                    f"expected {expected}, got {candidate}"
+                )
+            if not candidate.is_file() or candidate.suffix.lower() != ".pptx":
+                errors.append(f"candidate final PPTX does not exist: {candidate}")
+            elif native_delivery.get("sha256") and _sha256(candidate) != native_delivery["sha256"]:
+                errors.append("preserved native output hash changed after preflight")
+            try:
+                final = inspect_pptx(candidate)
+            except InputError as exc:
+                errors.append(f"candidate final PPTX is invalid: {exc}")
+                final = {"slide_count": 0, "slides": []}
+            evidence["slide_count"] = int(final.get("slide_count", 0))
+            expected_count = int(direct_manifest.get("slide_count", 0))
+            if expected_count != evidence["slide_count"]:
+                errors.append(
+                    f"final slide count mismatch: expected {expected_count}, found {evidence['slide_count']}"
+                )
+            for slide in final.get("slides", []):
+                native_content = bool(
+                    int(slide.get("text_chars", 0))
+                    or int(slide.get("table_count", 0))
+                    or int(slide.get("chart_count", 0))
+                    or int(slide.get("graphic_frame_count", 0))
+                )
+                image_only = int(slide.get("picture_count", 0)) == 1 and not native_content
+                if image_only or not native_content:
+                    errors.append(
+                        f"preserved final slide {slide.get('slide_number')} has no native editable content"
+                    )
+                else:
+                    evidence["slides_with_required_native_text"] += 1
+            result = {
+                "schema": "ppt_visual_editable_delivery_gate.v1",
+                "passed": not errors,
+                "errors": errors,
+                "evidence": evidence,
+            }
+            root.mkdir(parents=True, exist_ok=True)
+            _write_json(root / "editable-delivery-validation.json", result)
+            return result
     if not deck_run.is_file():
         errors.append(f"direct run is missing deck-run.json: {deck_run}")
     if not source_ledger.is_file():

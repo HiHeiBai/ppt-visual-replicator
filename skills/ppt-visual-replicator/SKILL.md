@@ -1,6 +1,6 @@
 ---
 name: ppt-visual-replicator
-description: "Recreate one selected PowerPoint slide or a complete deck as an editable PPTX without changing its content. Use the fixed pipeline: clean original-page screenshot → built-in imagegen redraw → PNG → image-to-editable-ppt."
+description: "Recreate one selected PowerPoint slide or a complete deck as an editable PPTX without changing its content. Preserve a fully native editable source instead of redrawing it; otherwise use the fixed pipeline: clean original-page screenshot → built-in imagegen redraw → PNG → image-to-editable-ppt."
 ---
 
 # PPT Visual Replicator
@@ -36,11 +36,24 @@ Do not ask for a speed profile, a style-contract JSON, shared assets, duplicate-
 - References control only palette, typography character, spacing, borders, shadows, and decoration. They never contribute facts, charts, tables, logos, photos, icons, or layouts.
 - For strict text protection, use the source ledger as the exact authority for every visible text run and critical number. Otherwise use the original rendered page as the authority, with the ledger as backup.
 - Generated text is provisional. Restore editable text from the original source, never from imagegen output.
+- Title typography is never inferred from imagegen. Use `title-styles.json` extracted from the source, unless the user explicitly selected a style contract with a `title_system`; then use that contract's declared title font/color/weight only.
 - Keep a complete screenshot, photo, chart image, or complex illustration as an independent positioned image only when decomposing it adds no useful editability. Never rasterize the complete slide.
 
 ## Default workflow
 
 Run each stage in order. Do not jump from `generated.png` to delivery.
+
+### 0. Preserve an already-native source
+
+Before rendering or invoking imagegen, inspect the target. This is a preservation check, not an alternate visual style: when every slide is already natively editable and the user did not ask for a restyle, rebuilding it is prohibited because it introduces visual drift.
+
+```bash
+python3 scripts/check_native_editability.py --target "target.pptx"
+```
+
+`prepare_direct_deck.py` runs this check automatically. If its `deck-run.json` status is `native-source-preserved`, stop the redraw workflow: the exact source has been copied to `reconstruction/final/origin_edited.pptx`. Open that output with macOS Quick Look and deliver it. Do not run imagegen, stage reconstruction inputs, or finalize a second time.
+
+Use `--force-reconstruct` only when the user explicitly asks to restyle or otherwise rebuild an already-native source. A selected single slide is preserved as a one-slide native PPTX without entering imagegen.
 
 ### 1. Prepare a clean original-page PNG
 
@@ -82,6 +95,7 @@ The command writes these per-page inputs:
 - `direct-image-prompt.txt` — the redraw prompt
 - `source-ledger.json` — native text and critical-token backup
 - `generated.png` — the required destination for the selected imagegen result
+- `title-styles.json` — source title font, color, size, weight, and placement authority for native reconstruction
 
 Inspect the source PNG before generating. Stop if it is clipped, has missing glyphs, or does not match the requested slide.
 
@@ -132,7 +146,9 @@ Rebuild locally, one page at a time. The default workflow does not require subag
 "$EDITPPT" run next "$RUN/reconstruction" --local --json
 ```
 
-This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. Follow that local page prompt to create the manifest, restore editable text from the original source/ledger, build the page, make its contact sheet, validate it, and write `page_result.json`.
+This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. Follow that local page prompt to create the manifest, restore editable text from the original source/ledger, build the page, and make its contact sheet.
+
+Before `editppt page validate` or `run record`, render the rebuilt one-page PPTX with macOS Quick Look and compare it to the original `source-content.png`. Run the page worker’s required `verify_page_visual.py` command, inspect its side-by-side and difference PNGs, and accept only a passing `visual-gate.json`. Never compare only against `generated.png`: an imagegen redraw can itself shift background color, cards, footers, title wrapping, or spacing.
 
 Claim and record the page with the same `agent-id`:
 
@@ -146,7 +162,7 @@ Claim and record the page with the same `agent-id`:
 "$EDITPPT" run record "$RUN/reconstruction" --page page_001 --agent-id main
 ```
 
-Repeat `run next --local` → local rebuild → `run record` for each remaining page. Do not dispatch a page before its prompt exists, and do not mark a failed validation as recorded.
+Repeat `run next --local` → local rebuild → original-source Quick Look gate → `run record` for each remaining page. Do not dispatch a page before its prompt exists, and do not mark a failed visual or structural validation as recorded.
 
 ### 4. Finalize and prove editability
 
@@ -171,7 +187,7 @@ python3 scripts/render_final_qa.py \
   --out-dir "$RUN/final-render"
 ```
 
-Inspect the selected slide for a one-page run. For a deck, inspect the first, midpoint, last, and every page flagged during reconstruction. Check clipping, text centering, page count/order, data retention, title/footer consistency, and accidental duplicate elements.
+Inspect the selected slide for a one-page run. For a deck, inspect the first, midpoint, last, and every page flagged during reconstruction. Check clipping, text centering, page count/order, data retention, title/footer consistency, and accidental duplicate elements. This final check does not replace the required page-level original-source visual gate.
 
 ## Delivery
 

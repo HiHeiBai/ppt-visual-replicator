@@ -120,8 +120,13 @@ class SkillPackageTest(unittest.TestCase):
             capture_output=True,
         )
         payload = json.loads(result.stdout)
-        self.assertEqual(Path(payload["install_command"][0]).name, "uv")
-        self.assertEqual(payload["install_command"][1:3], ["tool", "install"])
+        command = payload["install_command"]
+        executable = Path(command[0]).name
+        if executable == "uv":
+            self.assertEqual(command[1:3], ["tool", "install"])
+        else:
+            self.assertTrue(executable.startswith("python"))
+            self.assertEqual(command[1:4], ["-m", "pip", "install"])
 
     def test_acceptance_requires_direct_image_and_editable_ppt_consistency(self) -> None:
         text = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")

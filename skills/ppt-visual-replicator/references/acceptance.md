@@ -20,7 +20,9 @@
 - A deck run contains the same slide count and order as the requested target pages.
 - Required text and critical numeric tokens from the target are present as editable objects where practical.
 - In `visual-ocr` mode, editable text is recovered from the original source PNG with OCR/vision, not from generated text alone. In `strict-native` mode, every ledger-required text and critical token is validated exactly.
-- The editable preview remains visually faithful to the generated slide; structural validation alone is not enough.
+- For direct-redraw runs, each rebuilt `page.pptx` passes `verify_page_visual.py` against the original `source-content.png`, rendered with macOS Quick Look. The report records a reviewer acceptance, source/PPTX hashes, metrics, side-by-side image, and difference image. `run record` rejects a direct-run page without that gate.
+- Title font family, color, weight, size, and placement come from `title-styles.json` unless a user-selected style contract explicitly declares a `title_system` override for that page role. A generic deck palette or imagegen output is never title authority.
+- The editable preview remains visually faithful to the original source page as well as the generated visual reference; structural validation alone is not enough.
 - Complex charts, paper screenshots, and scientific illustrations may remain independent image objects.
 - In `fast` and `balanced`, eligible self-contained visual regions use `profile-rasterized-region` with a recorded reason. They never cover the complete slide behind editable text. In `strict`, every foreground visual follows the asset-sheet separation contract.
 - Text alignment and vertical anchoring use valid PowerPoint values; the finalized PPTX can be parsed and rendered by a real presentation renderer.

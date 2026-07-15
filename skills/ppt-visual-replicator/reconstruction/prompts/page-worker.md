@@ -10,6 +10,9 @@ Page id: {{PAGE_ID}}
 Page dir: {{PAGE_DIR}}
 Source image: {{SOURCE_IMAGE}}
 Original content image: {{ORIGINAL_SOURCE_IMAGE}}
+Source title style sheet: {{TITLE_STYLE_SHEET}}
+Explicit style contract: {{STYLE_CONTRACT}}
+Page family: {{PAGE_FAMILY}}
 Speed profile: {{SPEED_PROFILE}}
 Page route: {{PAGE_ROUTE}}
 Shared asset index: {{SHARED_ASSETS_INDEX}}
@@ -44,8 +47,21 @@ Work through the page in this order:
 2. Decide the background (page-decision-tree.md section 1) and record `background_strategy`.
 3. Decide foreground asset sources (section 2). Reuse matching shared assets first. In strict mode, or for non-eligible objects, run page-local image jobs serially with `editppt image generate` or `editppt image edit`; do not use a batch interface. In fast/balanced mode, extract eligible self-contained regions with `extract-page-region.py`, keeping their main placement in `box_px` and recording `profile-rasterized-region` provenance with `region_reason`. Put remaining icons/foreground objects onto one sparse asset sheet when they fit. After each selected generated output, record and process it with `editppt image import` and `editppt image process-sheet`.
 4. Rebuild native text, shapes, and tables (section 3). Fill `text_boxes` from the measured text hints per section 3.1; render formulas with `editppt formula render-latex` per section 3.2.
+
+   Title typography is a hard style lock. Read `{{TITLE_STYLE_SHEET}}` and use the record for this source slide. If `{{STYLE_CONTRACT}}` exists and declares `title_system.{{PAGE_FAMILY}}`, that explicit user-selected title system overrides only the declared font/color/weight fields; otherwise preserve the source title font, color, size, bold/italic state, and title box placement exactly. Do not let imagegen, the default deck palette, or a fallback font choose title color or typography. Preserve a source declaration such as `微软雅黑`/`Microsoft YaHei` in the native text run; do not replace it with Noto merely for local rendering.
 5. Write manifest.json following the field contracts in manifest-schema.md, including `speed_profile`, `text_inventory`, `visual_inventory`, `background_strategy`, `quality_checks`, and positioned `text_boxes`/`images`/`shapes`.
-6. Build the artifacts with the deterministic runtime: `editppt page build {{PAGE_DIR}}` (writes page.pptx and preview.png from manifest.json), then `editppt page contact-sheet {{PAGE_DIR}}`, then `editppt page validate {{PAGE_DIR}}` — it runs the same manifest-contract checks `editppt run record` will run, so fix every reported issue here, inside the page.
+6. Build the artifacts with the deterministic runtime: `editppt page build {{PAGE_DIR}}` (writes page.pptx and preview.png from manifest.json), then `editppt page contact-sheet {{PAGE_DIR}}`. Next run the native visual gate against the original source, not against `source.png` when it is a generated redraw:
+
+   ```bash
+   python3 "{{SKILL_ROOT}}/scripts/verify_page_visual.py" \
+     --source "{{ORIGINAL_SOURCE_IMAGE}}" \
+     --page-pptx "{{PAGE_DIR}}/page.pptx" \
+     --out-dir "{{PAGE_DIR}}/visual-qa" \
+     --accept
+   cp "{{PAGE_DIR}}/visual-qa/visual-gate.json" "{{PAGE_DIR}}/visual-gate.json"
+   ```
+
+   Inspect `visual-qa/side-by-side.png` and `visual-qa/difference.png` before using `--accept`. A failed metric or a visible change to background color, major geometry, card placement, footer/chrome, title wrapping, or text position is a current-page failure. Fix the manifest and rebuild; do not record the page. If retrying, use a new empty directory such as `visual-qa-retry-2`, then copy its `visual-gate.json` into `{{PAGE_DIR}}/visual-gate.json`. Only after the visual gate passes, run `editppt page validate {{PAGE_DIR}}` — it runs the same manifest-contract checks `editppt run record` will run, so fix every reported issue here, inside the page.
 
 The Page dir must contain when you return:
 - manifest.json
@@ -58,7 +74,7 @@ The Page dir must contain when you return:
 
 validation.json and page_result.json must follow the exact shapes defined in manifest-schema.md: validation.json carries the top-level boolean `passed` (not only a nested or renamed field), and page_result.json carries the minimal required key set.
 
-Before returning, run the Final Self-Check in page-decision-tree.md once: compare preview.png and split_assets_contact.png to the source, confirm `editppt page validate {{PAGE_DIR}}` passes, confirm validation.json contains top-level `passed: true`, and confirm all required outputs exist. Page-local issues are fixed inside the current page by you before returning.
+Before returning, run the Final Self-Check in page-decision-tree.md once: inspect `visual-qa/side-by-side.png` and `difference.png`, confirm `visual-gate.json` has `passed: true`, compare preview.png and split_assets_contact.png to the source, confirm `editppt page validate {{PAGE_DIR}}` passes, confirm validation.json contains top-level `passed: true`, and confirm all required outputs exist. `editppt run record` rejects a direct-run page without a passing visual gate. Page-local issues are fixed inside the current page by you before returning.
 
 On failure — when a hard rule cannot be satisfied or a required tool is unavailable — stop and return a page failure: write validation.json with `"passed": false` and the concrete failure reason (what failed, the exact error, what the parent must fix), plus page_result.json referencing whatever artifacts exist (omit keys for artifacts that were never produced). Do not fabricate the remaining artifacts and do not build an approximate page to make validation pass; the parent agent will fix the root cause and dispatch or claim a fresh page execution.
 

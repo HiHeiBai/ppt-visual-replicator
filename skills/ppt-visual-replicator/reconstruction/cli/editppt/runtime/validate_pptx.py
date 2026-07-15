@@ -21,6 +21,7 @@ ALLOWED_SOURCE_TYPES = {
     "asset-sheet-separated",
     "imagegen",
     "latex-rendered-formula",
+    "profile-rasterized-region",
     "user-provided",
     "user-approved-rasterization",
 }
@@ -144,6 +145,7 @@ def is_foreground_visual_item(item):
 
 def foreground_asset_contract_violations(manifest):
     violations = []
+    speed_profile = str(manifest.get("speed_profile") or "strict")
     provenance_by_path = {
         Path(entry.get("path", "")).as_posix(): entry
         for entry in manifest.get("asset_provenance", [])
@@ -164,17 +166,21 @@ def foreground_asset_contract_violations(manifest):
             )
         if not is_foreground_visual_item(item):
             continue
-        if not contains_any(text, ASSET_SHEET_TERMS):
+        path = visual_item_path(item)
+        provenance = provenance_by_path.get(path or "", {})
+        source_type = provenance.get("source_type")
+        profile_region = (
+            source_type == "profile-rasterized-region"
+            and speed_profile in {"fast", "balanced"}
+        )
+        if not contains_any(text, ASSET_SHEET_TERMS) and not profile_region:
             violations.append(
                 {
                     "field": field,
-                    "reason": "foreground visual objects must explicitly use source-faithful asset-sheet separation",
+                    "reason": "foreground visual objects must use source-faithful asset-sheet separation or a permitted fast/balanced profile region",
                 }
             )
-        path = visual_item_path(item)
         if path:
-            provenance = provenance_by_path.get(path, {})
-            source_type = provenance.get("source_type")
             if source_type in {"user-provided", "user-approved-rasterization"}:
                 violations.append(
                     {
@@ -191,6 +197,17 @@ def foreground_asset_contract_violations(manifest):
         source_type = entry.get("source_type")
         path = Path(entry.get("path", "")).as_posix()
         field = f"asset_provenance[{index}]"
+        if source_type == "profile-rasterized-region" and speed_profile not in {
+            "fast",
+            "balanced",
+        }:
+            violations.append(
+                {
+                    "field": field,
+                    "path": path,
+                    "reason": "profile-rasterized-region is allowed only in fast or balanced mode",
+                }
+            )
         if source_type in {"user-provided", "user-approved-rasterization"} and contains_any(
             text, FOREGROUND_TERMS | FORBIDDEN_FOREGROUND_FALLBACK_TERMS
         ):
@@ -252,7 +269,8 @@ def page_contract_violations(manifest):
             )
         if (
             is_full_slide_image(image, slide)
-            and source_type in {"user-provided", "user-approved-rasterization"}
+            and source_type
+            in {"user-provided", "user-approved-rasterization", "profile-rasterized-region"}
             and text_boxes
         ):
             violations.append(
@@ -748,6 +766,10 @@ def main():
         if source_type == "user-approved-rasterization" and not entry.get("approval_note"):
             report["invalid_asset_provenance"].append(
                 {"path": key, "field": "approval_note", "value": entry.get("approval_note")}
+            )
+        if source_type == "profile-rasterized-region" and not entry.get("region_reason"):
+            report["invalid_asset_provenance"].append(
+                {"path": key, "field": "region_reason", "value": entry.get("region_reason")}
             )
         source = entry.get("source")
         if not source:

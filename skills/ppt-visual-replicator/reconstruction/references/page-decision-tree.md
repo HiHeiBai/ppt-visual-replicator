@@ -10,6 +10,8 @@ Every `source.png` is judged in three steps, in this order:
 
 The order exists because steps 1-2 decide object sources and step 3 consumes those decisions. Nativizing text and layout first locks in wrong choices: text that belongs to a logo, a UI screenshot, or a to-be-separated asset must not become a native text box, and which text needs clean-base removal depends on the background decision. Define the boundaries between background, foreground, and native structure first; then write the manifest. Submit image jobs serially with `editppt image generate` or `editppt image edit`; do not parallelize page-local image jobs through a batch interface because concurrent asset-sheet calls make rate limits, retries, and reconciliation failures harder to diagnose.
 
+The page-worker prompt declares one speed profile. `strict` uses the complete asset-separation contract below. `balanced` and `fast` keep the same decision order but may preserve a self-contained screenshot, photo, chart image, or complex illustration as a positioned `profile-rasterized-region`. This exception never applies to a complete slide, main editable text, ordinary cards, tables, arrows, or structural shapes. Use the supplied shared deck asset library before any new page-local image job.
+
 Contents:
 
 - Common failure mode: false progress
@@ -24,7 +26,7 @@ Contents:
 
 Do not create a "good enough" editable draft by rebuilding text and layout while cropping or approximating foreground assets. This is false progress: it may pass deterministic validation but it fails the object-source contract. Deterministic validation is a structure gate, not a waiver — `validation.json.passed=true` never makes a forbidden foreground fallback acceptable.
 
-When a page has complex foreground visuals, first prove the foreground asset workflow is feasible. If it is not, stop with a page failure before building `manifest.json`. Do not convert the missing workflow into a warning, a direct source crop, a native-shape approximation, an emoji/text-symbol substitute, or any other fallback.
+In `strict` mode, when a page has complex foreground visuals, first prove the foreground asset workflow is feasible. If it is not, stop with a page failure before building `manifest.json`. Do not convert the missing workflow into a warning, a native-shape approximation, an emoji/text-symbol substitute, or any other fallback. In `balanced` or `fast` mode, use the declared profile-region path only for eligible self-contained complex regions; it is a planned object source, not a warning fallback.
 
 ## Pre-Decision: Page Inventory
 
@@ -99,9 +101,13 @@ Never screenshot a whole dashboard, whole table, whole card, or whole chart to s
 
 Step 2 decides only the source of non-text foreground visual objects. Every foreground object enters `visual_inventory` before its source is chosen.
 
-### 2.1 Foreground Assets Must Use Image Edit Separation
+### 2.1 Foreground Asset Sources
 
-Every non-text foreground visual object must be separated through the `editppt image edit --image <source.png>` asset-sheet workflow, including:
+First reuse an exact matching asset from the deck-level shared asset index. Do not regenerate a logo, mascot, decorative planet, recurring icon, or repeated chrome element that already has a compliant shared asset.
+
+In `strict` mode, every non-text foreground visual object must use image-edit separation. In `balanced` and `fast` modes, a self-contained screenshot, photo, complex chart image, or complex illustration may instead use `reconstruction/scripts/extract-page-region.py`. Record `speed_profile`, `source_type: profile-rasterized-region`, the source image, the positioned box, and a non-empty `region_reason`. Main titles, body text, numbers, labels outside the preserved region, and structural objects remain native.
+
+When the strict path applies, separate every non-text foreground visual object through the `editppt image edit --image <source.png>` asset-sheet workflow, including:
 
 - Foreground photos, foreground screenshots, video covers, foreground image blocks, map fragments, chart-image fragments, and rectangular illustrations.
 - Icons, pictograms, symbols, logo-like marks.
@@ -113,7 +119,7 @@ Every non-text foreground visual object must be separated through the `editppt i
 
 Do not approximate these with native primitives, even when one appears to be made of circles, lines, rectangles, or ellipses — the criterion is not "can it be drawn" but whether it is a foreground visual asset rather than a layout primitive. Do not substitute direct source-image snippets for source-faithful separation. Do not hand-draw or assemble foreground visual objects with local Python/Pillow/SVG/HTML/CSS code; deterministic tools are only for normalization, recording, background removal, splitting, formula rendering, building, validation, and QA.
 
-There is no fallback path. If asset-sheet separation cannot produce a compliant asset, the page is blocked until the asset workflow is fixed or the user explicitly changes the requirements for that exact object. Do not downgrade the missing separation to a warning; do not record, finalize, or deliver the fallback.
+There is no fallback path in `strict` mode. If asset-sheet separation cannot produce a compliant asset, the page is blocked until the asset workflow is fixed or the user explicitly changes the requirements for that exact object. Do not downgrade the missing separation to a warning. A declared `balanced` or `fast` profile region remains valid only when it satisfies the eligibility and provenance rules above.
 
 ### 2.2 Asset Sheet Prompt Principles
 
@@ -251,8 +257,8 @@ Background:
 
 Assets:
 
-- `visual_inventory` covers all non-text visual objects; each has an independent representation unless explicitly recorded as background; no required object is missing or stood in by a low-quality placeholder.
-- Every source decision follows sections 1-3: nothing marked for separation was replaced with a similar-but-different symbol, approximated with native primitives, or substituted with a source-image snippet.
+- `visual_inventory` covers all non-text visual objects; each has an independent representation, a shared-asset reference, or an eligible fast/balanced profile region unless explicitly recorded as background; no required object is missing or stood in by a low-quality placeholder.
+- Every source decision follows sections 1-3: nothing marked for separation was replaced with a similar-but-different symbol or approximated with native primitives.
 - Split assets have no fused objects, missing edges, wrong names, fragments, or cross-object shadows; alpha edges have no chroma-key remnants.
 
 Text:

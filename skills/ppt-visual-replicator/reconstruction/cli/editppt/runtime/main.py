@@ -29,6 +29,8 @@ from formula_renderer import (
 
 
 RUNTIME_DIR = Path(__file__).resolve().parent
+SKILL_ROOT = RUNTIME_DIR.parents[3]
+PROMPT_BUILDER = SKILL_ROOT / "reconstruction" / "scripts" / "build-page-worker-prompt.py"
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 
 
@@ -59,8 +61,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     argv = ["config"]
-    if args.api_key:
-        argv.extend(["--api-key", args.api_key])
+    if args.api_key_from_env:
+        argv.append("--api-key-from-env")
     if args.base_url:
         argv.extend(["--base-url", args.base_url])
     if args.clear_base_url:
@@ -69,8 +71,8 @@ def cmd_config(args: argparse.Namespace) -> int:
         argv.extend(["--model", args.model])
     if args.import_codex_ppt:
         argv.append("--import-codex-ppt")
-    if getattr(args, "paddle_ocr_token", None):
-        argv.extend(["--paddle-ocr-token", args.paddle_ocr_token])
+    if args.paddle_ocr_token_from_env:
+        argv.append("--paddle-ocr-token-from-env")
     return run_script("runtime_env.py", argv)
 
 
@@ -109,11 +111,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
-    argv = []
+    argv = ["--json"]
     if args.out_root:
         argv.extend(["--out-root", args.out_root])
     if args.job_dir:
         argv.extend(["--job-dir", args.job_dir])
+    if args.output_name:
+        argv.extend(["--output-name", args.output_name])
     if args.dpi:
         argv.extend(["--dpi", str(args.dpi)])
     if args.max_concurrent_pages:
@@ -121,24 +125,29 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     argv.extend(args.inputs)
     command = [sys.executable, str(RUNTIME_DIR / "prepare_deck_run.py"), *[str(item) for item in argv]]
     prepared = subprocess.run(command, text=True, capture_output=True)
-    if prepared.stdout:
-        print(prepared.stdout, end="")
     if prepared.stderr:
         print(prepared.stderr, end="", file=sys.stderr)
     if prepared.returncode != 0:
+        if prepared.stdout:
+            print(prepared.stdout, end="")
         return prepared.returncode
-    lines = [line.strip() for line in prepared.stdout.splitlines() if line.strip()]
-    if not lines:
-        print("prepare did not report a deck_manifest.json path", file=sys.stderr)
+    try:
+        preparation = json.loads(prepared.stdout)
+        deck_path = Path(str(preparation["deck_manifest"])).resolve()
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        print(f"prepare did not report valid JSON metadata: {exc}", file=sys.stderr)
         return 1
-    deck_path = Path(lines[0])
     if not deck_path.exists():
         print(f"prepare reported a missing deck_manifest.json path: {deck_path}", file=sys.stderr)
         return 1
+    print(json.dumps(preparation, ensure_ascii=False))
     if not getattr(args, "no_text_hints", False):
         # Best-effort: distribute per-page text measurements alongside the
         # page sources so workers start with hints already in place.
-        if run_script("deck_text_hints.py", [str(deck_path.parent)]) != 0:
+        hints_args = [str(deck_path.parent)]
+        if getattr(args, "text_hints_no_overlay", False):
+            hints_args.append("--no-overlay")
+        if run_script("deck_text_hints.py", hints_args) != 0:
             print("warning: text hints generation failed; workers can run `editppt page hints` per page", file=sys.stderr)
     return cmd_backend(
         argparse.Namespace(
@@ -192,6 +201,31 @@ def cmd_status(args: argparse.Namespace) -> int:
     return run_script("page_job_status.py", argv)
 
 
+def ensure_worker_prompt(run_dir: Path, page_id: str, prompt_out: Path) -> tuple[bool, str]:
+    """Create the prompt that ``run dispatch`` requires before returning it."""
+    if not PROMPT_BUILDER.is_file():
+        return False, f"prompt builder is missing: {PROMPT_BUILDER}"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PROMPT_BUILDER),
+            str(run_dir),
+            "--page",
+            str(page_id),
+            "--out",
+            str(prompt_out),
+            "--cli",
+            cli_prog(),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0 or not prompt_out.is_file():
+        detail = (result.stderr or result.stdout).strip()
+        return False, detail or f"prompt builder did not create: {prompt_out}"
+    return True, ""
+
+
 def cmd_next(args: argparse.Namespace) -> int:
     run_dir = run_dir_from_target(args.run)
     deck = load_deck(run_dir)
@@ -213,10 +247,26 @@ def cmd_next(args: argparse.Namespace) -> int:
         return print_json(payload) if args.json else _print_next_text(payload)
 
     if dispatchable and slots > 0:
-        selected = dispatchable[:slots]
+        local = bool(getattr(args, "local", False))
+        # Return one fully prepared hand-off at a time.  The previous batch
+        # response listed several pages while materializing a prompt for only
+        # the first one, so following its own commands could fail for page 2+.
+        selected = dispatchable[:1]
         first_page = find_page(jobs, selected[0])
         prompt_out = page_dir_for(run_dir, first_page) / "worker-prompt.md"
-        if len(pages) == 1 and selected == [first_page.get("page_id")]:
+        prompt_ready, prompt_error = ensure_worker_prompt(
+            run_dir, str(first_page.get("page_id")), prompt_out
+        )
+        if not prompt_ready:
+            payload = {
+                "run_dir": str(run_dir),
+                "stage": "build_prompt_failed",
+                "prompt_file": str(prompt_out),
+                "reason": prompt_error,
+                "agent_focus": "Fix the page prompt builder before dispatching a reconstruction page.",
+            }
+            return print_json(payload) if args.json else _print_next_text(payload)
+        if local or (len(pages) == 1 and selected == [first_page.get("page_id")]):
             payload = {
                 "run_dir": str(run_dir),
                 "stage": "rebuild_page_locally",
@@ -225,7 +275,7 @@ def cmd_next(args: argparse.Namespace) -> int:
                 "suggested_pages": selected,
                 "prompt_file": str(prompt_out),
                 "next_command": f"{cli_prog()} run dispatch {run_dir} --page {selected[0]} --agent-id main --prompt-file {prompt_out} --local",
-                "agent_focus": "Build the page prompt, claim local execution with dispatch --local, rebuild the page yourself using that prompt, then record the result.",
+                "agent_focus": "The page prompt is ready. Claim local execution with dispatch --local, rebuild this page, then record the result.",
             }
             return print_json(payload) if args.json else _print_next_text(payload)
         payload = {
@@ -236,7 +286,7 @@ def cmd_next(args: argparse.Namespace) -> int:
             "suggested_pages": selected,
             "prompt_file": str(prompt_out),
             "next_command": f"{cli_prog()} run dispatch {run_dir} --page {selected[0]} --agent-id <worker-id> --prompt-file {prompt_out}",
-            "agent_focus": "Build the page prompt, spawn the worker, then record dispatch.",
+            "agent_focus": "The first page prompt is ready. Spawn the worker, dispatch it, then record its result.",
         }
         return print_json(payload) if args.json else _print_next_text(payload)
 
@@ -459,20 +509,20 @@ perform a network API probe by default.
         description="""Configure API fallback values used by editppt image commands.
 
 Values are written to ~/.editppt/config.yaml. Environment variables still win at
-runtime. API keys are masked in command output.
+runtime. Secrets are accepted only from environment variables, never CLI arguments.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Examples:
-  editppt config --api-key "your-api-key" --model gpt-image-2
-  editppt config --api-key "your-api-key" --base-url https://example.test/v1 --model openai/gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --model gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --base-url https://example.test/v1 --model openai/gpt-image-2
   editppt config --clear-base-url
 """,
     )
-    config.add_argument("--api-key", help="OpenAI or OpenAI-compatible API key to store.")
+    config.add_argument("--api-key-from-env", action="store_true", help="Store OPENAI_API_KEY from the environment without exposing it in process arguments.")
     config.add_argument("--base-url", help="OpenAI-compatible base URL, for example https://api.openai.com/v1.")
     config.add_argument("--clear-base-url", action="store_true", help="Remove OPENAI_BASE_URL from the config file.")
     config.add_argument("--model", help="Default image model for API fallback.")
-    config.add_argument("--paddle-ocr-token", metavar="TOKEN", help="PaddleOCR-VL token for content-aware text hints. Apply at https://aistudio.baidu.com/account/accessToken.")
+    config.add_argument("--paddle-ocr-token-from-env", action="store_true", help="Store PADDLE_OCR_TOKEN from the environment without exposing it in process arguments.")
     config.add_argument("--import-codex-ppt", action="store_true", help="Import compatible values from ~/.codex-ppt-skill/.env when present.")
     config.set_defaults(func=cmd_config)
 
@@ -495,9 +545,11 @@ CLI backend. The normal path does not require a separate backend command.
     prepare.add_argument("inputs", nargs="+", metavar="INPUT", help="Input image, PDF, PPT, or PPTX path. Repeat for multiple images.")
     prepare.add_argument("--out-root", metavar="DIR", help="Directory that will contain generated run folders.")
     prepare.add_argument("--job-dir", metavar="DIR", help="Use an explicit run directory instead of auto-generating one.")
+    prepare.add_argument("--output-name", metavar="FILE", help="Final editable PPTX filename, relative to final/.")
     prepare.add_argument("--dpi", type=int, metavar="N", help="Rasterization DPI for PDF/PPT inputs.")
-    prepare.add_argument("--max-concurrent-pages", type=int, metavar="N", help="Maximum concurrent page dispatch slots. Default: 6.")
+    prepare.add_argument("--max-concurrent-pages", type=int, metavar="N", help="Maximum concurrent page dispatch slots. Default: 3.")
     prepare.add_argument("--no-text-hints", action="store_true", help="Skip per-page text hint generation after preparing pages.")
+    prepare.add_argument("--text-hints-no-overlay", action="store_true", help="Write text hint JSON without the labeled PNG overlays.")
     prepare.set_defaults(func=cmd_prepare)
 
     run = sub.add_parser(
@@ -515,11 +567,16 @@ record dispatch/result events, and assemble the final deck.
     run_next = run_sub.add_parser(
         "next",
         help="Print the next workflow action.",
-        description="Inspect run state and print the next suggested action.",
+        description="Inspect run state, create the selected page-local prompt, and print the next action.",
         formatter_class=HELP_FORMATTER,
     )
     run_next.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
     run_next.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    run_next.add_argument(
+        "--local",
+        action="store_true",
+        help="Select one pending page for sequential local reconstruction instead of worker dispatch.",
+    )
     run_next.set_defaults(func=cmd_next)
 
     status = run_sub.add_parser(
@@ -559,7 +616,7 @@ Use this only when forcing OpenAI-compatible API metadata or a custom image back
     dispatch = run_sub.add_parser(
         "dispatch",
         help="Record page dispatch.",
-        description="Mark a page as dispatched after a worker/thread has been created, or after the main agent claims a single-page run with --local.",
+        description="Mark a page as dispatched after a worker/thread has been created, or after the main agent claims that page for local reconstruction with --local.",
         formatter_class=HELP_FORMATTER,
     )
     dispatch.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
@@ -567,7 +624,7 @@ Use this only when forcing OpenAI-compatible API metadata or a custom image back
     dispatch.add_argument("--agent-id", required=True, metavar="ID", help="Runtime worker/thread id.")
     dispatch.add_argument("--prompt-file", required=True, metavar="FILE", help="Prompt file used to spawn the worker. It must resolve inside the page directory.")
     dispatch.add_argument("--agent-nickname", metavar="NAME", help="Optional human-readable worker label.")
-    dispatch.add_argument("--local", action="store_true", help="Claim a single-page run for main-agent local reconstruction instead of spawning a worker.")
+    dispatch.add_argument("--local", action="store_true", help="Claim this page for local reconstruction instead of spawning a worker.")
     dispatch.set_defaults(func=cmd_dispatch)
 
     record = run_sub.add_parser(
@@ -659,7 +716,7 @@ PowerPoint, not an editable equation object.
     formula_render.add_argument("--preamble-file", metavar="FILE", help="Read extra LaTeX preamble from a file.")
     formula_render.add_argument("--dpi", type=int, default=300, metavar="N", help="PNG rasterization DPI.")
     formula_render.add_argument("--timeout", type=int, default=120, metavar="SEC", help="Render/conversion timeout in seconds.")
-    formula_render.add_argument("--shell-escape", action="store_true", help="Allow LaTeX shell escape. Keep off unless the formula package requires it.")
+    formula_render.add_argument("--shell-escape", action="store_true", help="DANGEROUS: permit trusted LaTeX to execute programs; also requires EDITPPT_ALLOW_SHELL_ESCAPE=1.")
     formula_render.add_argument("--keep-workdir", metavar="DIR", help="Copy the temporary TeX workdir here for debugging.")
     formula_render.add_argument("--fragment", metavar="FILE", help="Write a manifest image fragment for this formula.")
     formula_render.add_argument("--box", metavar="X,Y,W,H", help="Source-pixel placement box for --fragment.")
@@ -742,8 +799,8 @@ asset-sheet splitting inside page directories.
 
 Setup:
   codex login
-  editppt config --api-key "your-api-key" --model gpt-image-2
-  editppt config --api-key "your-api-key" --base-url https://example.test/v1 --model openai/gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --model gpt-image-2
+  OPENAI_API_KEY=... editppt config --api-key-from-env --base-url https://example.test/v1 --model openai/gpt-image-2
 
 Parameter surface:
   generate/edit backend requests pass only model, prompt, size, and quality.

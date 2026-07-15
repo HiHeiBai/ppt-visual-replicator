@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Prepare one target slide and one reference slide for direct image editing."""
+"""Prepare content and optional shared style images for direct image generation."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
-import subprocess
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from pptx_inspect import InputError, inspect_pptx
+from render_source_pages import SourceRenderError, render_pptx_to_pngs
 
 
 class DirectRunError(ValueError):
@@ -21,65 +24,64 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _direct_prompt(target_slide: int, reference_slide: int) -> str:
-    return f"""Redraw one complete 16:9 presentation slide.
-
-The first image is the target slide {target_slide} and is the edit target and content authority.
-The second image is the reference style slide {reference_slide} and is visual-style authority only.
-
-Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning. Transfer the reference typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment.
-
-Do not copy reference wording, facts, logos, page numbers, confidential codes, or study data. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, or images. Keep all target text legible, but treat generated text as provisional because exact source text will be restored during editable reconstruction.
-
-Return one complete slide image only. Do not add a mockup frame, perspective, hands, devices, or surrounding UI.
-"""
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def _render_slide(pptx: Path, slide_number: int, output: Path) -> None:
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    pdftoppm = shutil.which("pdftoppm")
-    if not soffice or not pdftoppm:
-        missing = [
-            name
-            for name, value in (("soffice/libreoffice", soffice), ("pdftoppm", pdftoppm))
-            if not value
-        ]
-        raise DirectRunError(f"renderer command is unavailable: {', '.join(missing)}")
-    render_dir = output.parent / f".{output.stem}-render"
-    render_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(render_dir), str(pptx)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    pdfs = list(render_dir.glob("*.pdf"))
-    if len(pdfs) != 1:
-        raise DirectRunError(f"renderer did not create one PDF for {pptx.name}")
-    prefix = render_dir / output.stem
-    subprocess.run(
-        [
-            pdftoppm,
-            "-png",
-            "-r",
-            "150",
-            "-f",
-            str(slide_number),
-            "-l",
-            str(slide_number),
-            "-singlefile",
-            str(pdfs[0]),
-            str(prefix),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    rendered = prefix.with_suffix(".png")
-    if not rendered.is_file() or not rendered.stat().st_size:
-        raise DirectRunError(f"renderer did not create slide {slide_number} for {pptx.name}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    rendered.replace(output)
+def _copy_input_image(source: str | Path, destination: Path, role: str) -> dict[str, str]:
+    image = Path(source).expanduser().resolve()
+    if image.suffix.lower() != ".png":
+        raise DirectRunError(f"{role} image must be a PNG: {image}")
+    if not image.is_file() or not image.stat().st_size:
+        raise DirectRunError(f"{role} image does not exist or is empty: {image}")
+    shutil.copy2(image, destination)
+    return {"path": str(image), "sha256": _sha256(image)}
+
+
+def _manifest_declares_generated_image(manifest_path: Path, image: Path) -> bool:
+    """Return whether a direct-run manifest identifies ``image`` as generated."""
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+
+    candidates = [manifest.get("generated_image")]
+    for page in manifest.get("pages", []):
+        if isinstance(page, dict):
+            candidates.append(page.get("generated_image"))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            if (manifest_path.parent / str(candidate)).resolve() == image:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def is_generated_run_artifact(image: Path) -> bool:
+    """Reject known generated, preview, and prior-run output files as references.
+
+    The pipeline does not try to infer the visual provenance of an arbitrary
+    external bitmap. It instead requires an explicit user-supplied declaration
+    and refuses every image that a direct run records as an output. Searching
+    ancestors also catches a deck-level ``deck-run.json`` when a page artifact
+    is passed by its nested path.
+    """
+    if image.name.lower() in {"generated.png", "preview.png"}:
+        return True
+    for directory in (image.parent, *image.parents):
+        for manifest_name in ("run.json", "deck-run.json"):
+            if _manifest_declares_generated_image(directory / manifest_name, image):
+                return True
+    return False
 
 
 def _require_slide(ledger: dict[str, Any], slide_number: int, role: str) -> None:
@@ -88,76 +90,363 @@ def _require_slide(ledger: dict[str, Any], slide_number: int, role: str) -> None
         raise DirectRunError(f"{role} slide does not exist: {slide_number}")
 
 
+def _content_spec(
+    slide: dict[str, Any],
+    target_slide: int,
+    *,
+    strict_text_protection: bool,
+) -> dict[str, Any]:
+    native_text = slide["texts"]
+    native_tokens = slide["critical_tokens"]
+    return {
+        "schema": "ppt_visual_content_spec.v2",
+        "target_slide": target_slide,
+        "text_protection_mode": "strict-native" if strict_text_protection else "visual-ocr",
+        "ocr_source": "source-content.png",
+        "required_text": native_text if strict_text_protection else [],
+        "critical_tokens": native_tokens if strict_text_protection else [],
+        "supplemental_native_text": native_text,
+        "supplemental_critical_tokens": native_tokens,
+        "object_summary": {
+            key: slide[key]
+            for key in ("picture_count", "table_count", "chart_count", "graphic_frame_count")
+        },
+    }
+
+
+def _load_style_contract(
+    value: str | Path | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Load a deck-level visual contract without allowing page-local drift."""
+
+    if value is None:
+        return {
+            "schema": "ppt_visual_style_contract.v1",
+            "name": "shared-style-lock",
+            "reference_content_firewall": True,
+            "rules": [
+                "Use the same palette, typography character, spacing rhythm, and decorative language on every page.",
+                "Reference pages may not contribute charts, tables, diagrams, data panels, icons, photos, or page layouts.",
+                "The source page is the only authority for content-bearing visual objects and their count.",
+            ],
+        }
+    if isinstance(value, Mapping):
+        contract = dict(value)
+    else:
+        path = Path(value).expanduser().resolve()
+        if not path.is_file():
+            raise DirectRunError(f"style contract does not exist: {path}")
+        try:
+            contract = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise DirectRunError(f"style contract is not valid JSON: {path}") from exc
+    if not isinstance(contract, dict) or not contract.get("name"):
+        raise DirectRunError("style contract must be a JSON object with a non-empty name")
+    return contract
+
+
+def _as_reference_images(
+    value: str | Path | Sequence[str | Path] | None,
+) -> list[str | Path]:
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        return [value]
+    return list(value)
+
+
+def _as_reference_slides(value: int | Sequence[int] | None) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, int):
+        return [value]
+    return [int(item) for item in value]
+
+
+def _reference_prompt(reference_slides: list[int | None]) -> str:
+    if not reference_slides:
+        return """No style-reference image was supplied. Create a coherent professional presentation style appropriate to the target content. Use a restrained palette, clear title hierarchy, consistent spacing, safe margins, and presentation-ready visual structure. If an explicit style brief appears below, follow it. Do not refuse or stop because a reference image is absent."""
+
+    labels = [
+        f"image {index + 2}" + (f" (source slide {slide})" if slide is not None else "")
+        for index, slide in enumerate(reference_slides)
+    ]
+    return f"""The additional images are a shared style-reference set: {', '.join(labels)}. They are visual-style authority only. Use their common typography character, palette, spacing rhythm, visual hierarchy, decorative language, borders, and background treatment. They are deck-level style samples that may be reused for every target page; their order and count do not map one-to-one to target pages. If the samples differ, follow their common visual language instead of copying any single layout literally."""
+
+
+def _direct_prompt(
+    target_slide: int,
+    reference_slides: list[int | None],
+    content_spec: dict[str, Any],
+    style_brief: str | None,
+    style_contract: dict[str, Any],
+) -> str:
+    strict_mode = content_spec["text_protection_mode"] == "strict-native"
+    source_text = "\n".join(
+        f"- {text}" for text in content_spec["supplemental_native_text"]
+    ) or "- No supplemental native text was available"
+    critical_tokens = ", ".join(content_spec["supplemental_critical_tokens"]) or "none"
+    style_instructions = _reference_prompt(reference_slides)
+    brief = style_brief.strip() if style_brief else ""
+    brief_block = f"\nExplicit style brief: {brief}\n" if brief else ""
+    summary = content_spec["object_summary"]
+    source_visual_contract = "\n".join(
+        (
+            "Source visual inventory (authoritative, not an invitation to add objects):",
+            f"- pictures: {summary['picture_count']}",
+            f"- tables: {summary['table_count']}",
+            f"- charts: {summary['chart_count']}",
+            f"- graphic frames: {summary['graphic_frame_count']}",
+        )
+    )
+    chart_ban = ""
+    if not summary["chart_count"]:
+        chart_ban = (
+            " The source declares zero chart objects: do not add pie/donut/bar/line charts, "
+            "graphs, data panels, legends, axes, or percentage diagrams."
+        )
+    contract_json = json.dumps(style_contract, ensure_ascii=False, indent=2)
+    if strict_mode:
+        text_contract = f"""Use the source image plus the native PPTX ledger. The following native text must remain present and exact:
+{source_text}
+Critical tokens that must remain exact: {critical_tokens}."""
+    else:
+        text_contract = f"""Read all visible text from the first image with OCR/vision and preserve it. Native PPTX text extraction is supplemental only and may be incomplete; do not stop when it is empty. Use this automatic backup when it clarifies blurred or missing rendered glyphs:
+{source_text}
+Supplemental critical tokens: {critical_tokens}."""
+    return f"""Redraw one complete 16:9 presentation slide.
+
+The first image is the clean content source for target slide {target_slide}; it is the content and layout authority.
+{style_instructions}
+{brief_block}
+
+Deck-level style lock (apply it identically to every compatible page; do not sample a new palette per page):
+```json
+{contract_json}
+```
+
+Reference-content firewall: reference images control only palette, typography character, spacing rhythm, borders, shadows, and non-semantic decoration. They must never donate charts, pie/donut graphics, tables, cards, diagrams, data panels, photos, icons, logos, text, or page composition. The first image alone controls the page's information-bearing objects, their count, and their placement.
+
+{source_visual_contract}
+
+Preserve the target canvas ratio, content responsibilities, text regions, data relationships, chart meaning, table meaning, citations, and source-image meaning.
+
+Do not copy reference wording, facts, logos, page numbers, confidential codes, study data, or visual components. Do not add, delete, summarize, translate, or rewrite target claims, numbers, charts, tables, citations, images, or content-bearing diagrams.{chart_ban} Keep all target text legible, but treat generated text as provisional because source text will be restored during editable reconstruction.
+
+{text_contract}
+
+Before returning, visually audit the slide: reject any newly invented chart or diagram, any content-bearing object borrowed from a reference image, or any color/typography outside the deck-level style lock.
+
+Return one complete slide image only. Do not add a mockup frame, perspective, hands, devices, or surrounding UI.
+"""
+
+
 def prepare_direct_page(
     target: str | Path,
-    reference: str | Path,
     *,
     target_slide: int,
-    reference_slide: int,
     run_dir: str | Path,
-    skip_render: bool = False,
+    source_image: str | Path | None = None,
+    source_dpi: int = 192,
+    strict_text_protection: bool = False,
+    reference_image: str | Path | Sequence[str | Path] | None = None,
+    reference_slide: int | Sequence[int] | None = None,
+    reference_user_supplied: bool = False,
+    style_brief: str | None = None,
+    style_contract: str | Path | Mapping[str, Any] | None = None,
+    ledger: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     destination = Path(run_dir).expanduser().resolve()
     if destination.exists():
         raise DirectRunError(f"run directory already exists: {destination}")
-    try:
-        target_ledger = inspect_pptx(target)
-        reference_ledger = inspect_pptx(reference)
-    except InputError as exc:
-        raise DirectRunError(str(exc)) from exc
+    if ledger is None:
+        try:
+            target_ledger = inspect_pptx(target)
+        except InputError as exc:
+            raise DirectRunError(str(exc)) from exc
+    else:
+        # Deck preparation already inspected the immutable source PPTX. Reuse
+        # that ledger instead of re-opening and parsing the full package once
+        # per page. Direct single-page calls keep the previous self-contained
+        # behaviour by omitting this optional argument.
+        target_ledger = dict(ledger)
     _require_slide(target_ledger, target_slide, "target")
-    _require_slide(reference_ledger, reference_slide, "reference")
     target_slide_ledger = next(
         slide for slide in target_ledger["slides"] if int(slide["slide_number"]) == target_slide
     )
 
-    destination.mkdir(parents=True)
-    prompt = _direct_prompt(target_slide, reference_slide)
+    rendered_source: tempfile.TemporaryDirectory[str] | None = None
+    source_render_report: dict[str, Any] | None = None
+    try:
+        if source_image is None:
+            rendered_source = tempfile.TemporaryDirectory(prefix="ppt-direct-source-")
+            try:
+                source_render_report = render_pptx_to_pngs(
+                    target_ledger["path"],
+                    Path(rendered_source.name) / "source-pages",
+                    dpi=source_dpi,
+                    first_slide=target_slide,
+                    last_slide=target_slide,
+                    ledger=target_ledger,
+                )
+            except SourceRenderError as exc:
+                raise DirectRunError(str(exc)) from exc
+            source_image = source_render_report["pages"][0]["path"]
+
+        destination.mkdir(parents=True)
+        reference_images = _as_reference_images(reference_image)
+        if reference_images and not reference_user_supplied:
+            raise DirectRunError(
+                "reference images require reference_user_supplied=True; generated or prior-run images "
+                "must never become style references"
+            )
+        provided_slides = _as_reference_slides(reference_slide)
+        if provided_slides and len(provided_slides) != len(reference_images):
+            raise DirectRunError(
+                "reference slide metadata must be omitted or supplied once per reference image"
+            )
+        reference_slides: list[int | None] = (
+            [*provided_slides] if provided_slides else [None] * len(reference_images)
+        )
+
+        source_info = _copy_input_image(source_image, destination / "source-content.png", "source")
+        source_info["mode"] = "auto-rendered-pptx" if source_render_report else "supplied-png"
+        if source_render_report:
+            source_info["path"] = target_ledger["path"]
+            source_info["source_pptx_sha256"] = target_ledger["sha256"]
+            source_info["target_slide"] = target_slide
+            persistent_render_report = {
+                **source_render_report,
+                "pages": [
+                    {
+                        **source_render_report["pages"][0],
+                        "path": "source-content.png",
+                    }
+                ],
+            }
+            _write_json(destination / "source-render-report.json", persistent_render_report)
+
+        reference_inputs: list[dict[str, Any]] = []
+        for index, (image, slide) in enumerate(zip(reference_images, reference_slides)):
+            resolved = Path(image).expanduser().resolve()
+            if is_generated_run_artifact(resolved):
+                raise DirectRunError(
+                    f"refusing generated slide as a style reference: {resolved}; use a user-supplied "
+                    "reference image or a JSON style contract instead"
+                )
+            filename = (
+                "reference-style.png"
+                if len(reference_images) == 1
+                else f"reference-style-{index + 1:02d}.png"
+            )
+            info = _copy_input_image(image, destination / filename, f"reference {index + 1}")
+            reference_inputs.append(
+                {"image": filename, "source_slide": slide, "origin": "user-supplied", **info}
+            )
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+    finally:
+        if rendered_source is not None:
+            rendered_source.cleanup()
+
+    content_spec = _content_spec(
+        target_slide_ledger,
+        target_slide,
+        strict_text_protection=strict_text_protection,
+    )
+    clean_style_brief = style_brief.strip() if style_brief else ""
+    loaded_style_contract = _load_style_contract(style_contract)
+    style_mode = "reference_set" if reference_inputs else ("brief" if clean_style_brief else "default")
+    reference_files = [item["image"] for item in reference_inputs]
     manifest = {
-        "schema": "ppt_visual_direct_run.v1",
+        "schema": "ppt_visual_direct_run.v2",
         "target_pptx": target_ledger["path"],
-        "reference_pptx": reference_ledger["path"],
         "target_slide": target_slide,
-        "reference_slide": reference_slide,
-        "target_image": "target.png",
-        "reference_image": "reference.png",
+        "style_mode": style_mode,
+        "text_protection_mode": content_spec["text_protection_mode"],
+        "style_brief": clean_style_brief or None,
+        "style_contract": "style-contract.json",
+        "reference_slide": reference_slides[0] if len(reference_slides) == 1 else None,
+        "reference_slides": reference_slides,
+        "source_image": "source-content.png",
+        "reference_image": reference_files[0] if len(reference_files) == 1 else None,
+        "reference_images": reference_files,
         "source_ledger": "source-ledger.json",
-        "prompt": "image-edit-prompt.txt",
+        "source_render_report": "source-render-report.json" if source_render_report else None,
+        "content_spec": "content-spec.json",
+        "prompt": "direct-image-prompt.txt",
         "generated_image": "generated.png",
         "reconstruction_dir": "reconstruction",
+        "inputs": {"source": source_info, "references": reference_inputs},
     }
     _write_json(
         destination / "source-ledger.json",
         {
             "source_pptx": target_ledger["path"],
             "target_slide": target_slide,
+            "text_protection_mode": content_spec["text_protection_mode"],
             "slide": target_slide_ledger,
         },
     )
+    _write_json(destination / "content-spec.json", content_spec)
+    _write_json(destination / "style-contract.json", loaded_style_contract)
     _write_json(destination / "run.json", manifest)
-    (destination / "image-edit-prompt.txt").write_text(prompt, encoding="utf-8")
-    if not skip_render:
-        _render_slide(Path(target_ledger["path"]), target_slide, destination / "target.png")
-        _render_slide(Path(reference_ledger["path"]), reference_slide, destination / "reference.png")
+    (destination / "direct-image-prompt.txt").write_text(
+        _direct_prompt(
+            target_slide,
+            reference_slides,
+            content_spec,
+            clean_style_brief,
+            loaded_style_contract,
+        ),
+        encoding="utf-8",
+    )
     return manifest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Prepare one target and one reference page for direct visual replication.")
+    parser = argparse.ArgumentParser(
+        description="Prepare a source image and optional shared style images for direct generation."
+    )
     parser.add_argument("--target", required=True)
     parser.add_argument("--target-slide", required=True, type=int)
-    parser.add_argument("--reference", required=True)
-    parser.add_argument("--reference-slide", required=True, type=int)
+    parser.add_argument(
+        "--source-image",
+        help="Optional clean PNG override. When omitted, render the selected target slide automatically.",
+    )
+    parser.add_argument("--source-dpi", type=int, default=192)
+    parser.add_argument(
+        "--strict-text-protection",
+        action="store_true",
+        help="Require native PPTX text and critical tokens as exact-content authority.",
+    )
+    parser.add_argument("--reference-image", action="append")
+    parser.add_argument("--reference-slide", action="append", type=int)
+    parser.add_argument(
+        "--reference-user-supplied",
+        action="store_true",
+        help="Required when passing a reference image; never use this for a generated or prior-run page.",
+    )
+    parser.add_argument("--style-brief")
+    parser.add_argument(
+        "--style-contract",
+        help="Optional JSON file that locks deck-level colors, typography, and reference-content rules.",
+    )
     parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--skip-render", action="store_true")
     args = parser.parse_args()
     manifest = prepare_direct_page(
         args.target,
-        args.reference,
         target_slide=args.target_slide,
-        reference_slide=args.reference_slide,
         run_dir=args.run_dir,
-        skip_render=args.skip_render,
+        source_image=args.source_image,
+        source_dpi=args.source_dpi,
+        strict_text_protection=args.strict_text_protection,
+        reference_image=args.reference_image,
+        reference_slide=args.reference_slide,
+        reference_user_supplied=args.reference_user_supplied,
+        style_brief=args.style_brief,
+        style_contract=args.style_contract,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0

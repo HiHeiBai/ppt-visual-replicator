@@ -76,15 +76,66 @@ def page_worker_template() -> str:
     return text[start:end].strip()
 
 
+def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
+    context = {
+        "speed_profile": "strict",
+        "original_source_image": str(page_dir_for(run_dir, page) / "source.png"),
+        "shared_assets_index": "none",
+        "page_route": "strict page-local reconstruction",
+        "canonical_page_dir": "none",
+    }
+    direct_run_path = run_dir.parent / "deck-run.json"
+    if not direct_run_path.is_file():
+        return context
+    direct_run = read_json(direct_run_path)
+    page_index = int(page.get("page_index") or 0)
+    direct_pages = direct_run.get("pages") or []
+    if page_index < 1 or page_index > len(direct_pages):
+        return context
+    direct_page = direct_pages[page_index - 1]
+    generation = direct_page.get("generation") or {}
+    reconstruction = direct_page.get("reconstruction") or {}
+    speed_profile = str(direct_run.get("speed_profile") or "strict")
+    canonical_slide = int(reconstruction.get("canonical_slide") or page_index)
+    context.update(
+        {
+            "speed_profile": speed_profile,
+            "original_source_image": str(
+                (run_dir.parent / direct_page["source_image"]).resolve()
+            ),
+            "shared_assets_index": str(
+                (run_dir.parent / str(direct_run.get("shared_assets") or "shared-assets/index.json")).resolve()
+            ),
+            "page_route": json.dumps(
+                {"generation": generation, "reconstruction": reconstruction},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            "canonical_page_dir": (
+                str((run_dir / "pages" / f"page_{canonical_slide:03d}").resolve())
+                if reconstruction.get("action") == "reuse-canonical"
+                else "none"
+            ),
+        }
+    )
+    return context
+
+
 def build_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
     request = read_json(page_dir / "page_request.json")
     page_id = page.get("page_id")
     source_image = request.get("source_image") or str(page_dir / "source.png")
+    workflow = direct_workflow_context(run_dir, page)
     replacements = {
         "{{RUN_DIR}}": str(run_dir),
         "{{PAGE_ID}}": str(page_id),
         "{{PAGE_DIR}}": str(page_dir),
         "{{SOURCE_IMAGE}}": str(source_image),
+        "{{ORIGINAL_SOURCE_IMAGE}}": workflow["original_source_image"],
+        "{{SPEED_PROFILE}}": workflow["speed_profile"],
+        "{{SHARED_ASSETS_INDEX}}": workflow["shared_assets_index"],
+        "{{PAGE_ROUTE}}": workflow["page_route"],
+        "{{CANONICAL_PAGE_DIR}}": workflow["canonical_page_dir"],
         "{{SKILL_ROOT}}": str(SKILL_ROOT),
     }
     prompt = page_worker_template()

@@ -82,8 +82,10 @@ def rel_source_part(rels_name):
 
 
 def resolve_target(rels_name, target):
+    if target.startswith("/"):
+        return posixpath.normpath(target).lstrip("/")
     source = rel_source_part(rels_name)
-    return posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+    return posixpath.normpath(posixpath.join(posixpath.dirname(source), target)).lstrip("/")
 
 
 def collect_notes_from_pptx(pptx_path, notes_dir=None):
@@ -102,7 +104,7 @@ def collect_notes_from_pptx(pptx_path, notes_dir=None):
             rel_id = sld_id.attrib.get(f"{{{NS['r']}}}id")
             target = rels_by_id.get(rel_id)
             if target:
-                slide_parts.append(posixpath.normpath(posixpath.join("ppt", target)))
+                slide_parts.append(resolve_target("ppt/_rels/presentation.xml.rels", target))
         for page_index, slide_part in enumerate(slide_parts, start=1):
             rels_name = f"{posixpath.dirname(slide_part)}/_rels/{posixpath.basename(slide_part)}.rels"
             note = {"page_index": page_index, "text": "", "text_sha256": sha256_text(""), "source_slide": slide_part}
@@ -144,7 +146,7 @@ def slide_parts_from_pptx(zip_file):
         rel_id = sld_id.attrib.get(f"{{{NS['r']}}}id")
         target = rels_by_id.get(rel_id)
         if target:
-            slide_parts.append(posixpath.normpath(posixpath.join("ppt", target)))
+            slide_parts.append(resolve_target("ppt/_rels/presentation.xml.rels", target))
     if not slide_parts:
         raise ValueError("PPTX has no slides.")
     return slide_parts
@@ -282,7 +284,7 @@ def default_output_name(input_paths):
     return f"{stem}_edited.pptx"
 
 
-def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=None, dpi=180):
+def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=None, dpi=180, output_name=None):
     input_paths = [Path(path).resolve() for path in inputs]
     job_dir = Path(job_dir).resolve() if job_dir else default_job_dir(out_root, input_paths).resolve()
     input_dir = job_dir / "input"
@@ -321,7 +323,9 @@ def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=No
                 if source_pptx != copied[0]:
                     shutil.copy2(source_pptx, input_dir / source_pptx.name)
                 rendered_pdf = convert_office_to_pdf(copied[0], tmp_dir)
-                sources = render_pdf_pages(rendered_pdf, pages_dir, args.dpi)
+                # normalize_inputs() is also called programmatically, so use
+                # its explicit DPI contract rather than argparse state.
+                sources = render_pdf_pages(rendered_pdf, pages_dir, dpi)
         pages = [page_record(job_dir, i, source, copied[0], i) for i, source in enumerate(sources, start=1)]
     elif suffixes <= IMG_EXTS:
         input_type = "image" if len(copied) == 1 else "images"
@@ -347,7 +351,7 @@ def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=No
         "inputs": [path.relative_to(job_dir).as_posix() for path in copied],
         "pages": pages,
         "notes_manifest": notes_manifest_path.relative_to(job_dir).as_posix(),
-        "output": default_output_name(copied),
+        "output": output_name or default_output_name(copied),
         "validation": "validation.json",
     }
     deck_manifest_path = job_dir / "deck_manifest.json"

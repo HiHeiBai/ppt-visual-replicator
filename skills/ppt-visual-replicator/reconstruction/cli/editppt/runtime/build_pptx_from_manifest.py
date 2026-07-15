@@ -280,6 +280,38 @@ def preview_color(value):
     return value
 
 
+def ooxml_text_align(value):
+    key = str(value or "left").strip().lower()
+    return {
+        "left": "l",
+        "l": "l",
+        "center": "ctr",
+        "middle": "ctr",
+        "ctr": "ctr",
+        "right": "r",
+        "r": "r",
+        "justify": "just",
+        "just": "just",
+    }.get(key, "l")
+
+
+def ooxml_text_anchor(value):
+    key = str(value or "top").strip().lower()
+    return {
+        "top": "t",
+        "t": "t",
+        "center": "ctr",
+        "middle": "ctr",
+        "ctr": "ctr",
+        "bottom": "b",
+        "b": "b",
+    }.get(key, "t")
+
+
+def preview_text_align(value):
+    return {"l": "left", "ctr": "center", "r": "right"}.get(ooxml_text_align(value), "left")
+
+
 def shape_fill(fill):
     if not fill or fill == "none":
         return '<a:noFill/>'
@@ -318,8 +350,8 @@ def text_box_xml(idx, item):
     rotation_attr = f' rot="{int(float(rotation) * 60000)}"' if rotation not in (None, "") else ""
     font_size = int(float(item.get("font_size", 18)) * 100)
     font = xml_text(item.get("font", "PingFang SC"))
-    align = item.get("align", "left")
-    anchor = item.get("valign", "top")
+    align = ooxml_text_align(item.get("align", item.get("alignment")))
+    anchor = ooxml_text_anchor(item.get("valign", item.get("vertical_alignment")))
     wrap = item.get("wrap", "none")
     autofit = item.get("autofit", "none")
     autofit_xml = "<a:spAutoFit/>" if autofit == "shape" else "<a:noAutofit/>"
@@ -823,7 +855,8 @@ def render_preview(manifest, manifest_path, out_path):
         else:
             preview_text = item.get("text", "")
         fill = preview_color(item.get("color", "#111111"))
-        align = item.get("align", "left") if item.get("align", "left") in ("left", "center", "right") else "left"
+        align = preview_text_align(item.get("align", item.get("alignment")))
+        anchor = ooxml_text_anchor(item.get("valign", item.get("vertical_alignment")))
         x = int(item.get("left", 0) * scale)
         y = int(item.get("top", 0) * scale)
         rotation = float(item.get("rotation", 0) or 0)
@@ -853,6 +886,19 @@ def render_preview(manifest, manifest_path, out_path):
             rotated = layer.rotate(-rotation, expand=True)
             canvas.paste(rotated, (x, y), rotated)
             return
+        box_width = max(1, int(item.get("width", 1) * scale))
+        box_height = max(1, int(item.get("height", 0.4) * scale))
+        text_box = draw.multiline_textbbox((0, 0), preview_text, font=font, spacing=4, align=align)
+        text_width = max(0, text_box[2] - text_box[0])
+        text_height = max(0, text_box[3] - text_box[1])
+        if align == "center":
+            x += max(0, (box_width - text_width) // 2)
+        elif align == "right":
+            x += max(0, box_width - text_width)
+        if anchor == "ctr":
+            y += max(0, (box_height - text_height) // 2)
+        elif anchor == "b":
+            y += max(0, box_height - text_height)
         draw.multiline_text((x, y), preview_text, fill=fill, font=font, spacing=4, align=align)
 
     layered = []

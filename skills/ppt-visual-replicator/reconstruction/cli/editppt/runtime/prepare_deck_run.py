@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -180,7 +181,9 @@ def main():
     parser.add_argument("inputs", nargs="+")
     parser.add_argument("--out-root", default="output/image-to-editable-ppt")
     parser.add_argument("--job-dir")
+    parser.add_argument("--output-name", help="Final editable PPTX filename, relative to final/.")
     parser.add_argument("--dpi", type=int, default=180)
+    parser.add_argument("--json", action="store_true", help="Print one machine-readable preparation record.")
     parser.add_argument(
         "--max-concurrent-pages",
         type=int,
@@ -191,15 +194,30 @@ def main():
     if args.max_concurrent_pages < 1:
         raise SystemExit("--max-concurrent-pages must be >= 1")
 
-    deck_path = normalize_inputs(args.inputs, out_root=args.out_root, job_dir=args.job_dir, dpi=args.dpi)
+    deck_path = normalize_inputs(
+        args.inputs,
+        out_root=args.out_root,
+        job_dir=args.job_dir,
+        dpi=args.dpi,
+        output_name=args.output_name,
+    )
     run_dir = deck_path.parent
     if not (run_dir / "pages").exists():
         raise SystemExit(f"Input normalization did not create pages/: {run_dir}")
     deck = upgrade_deck_manifest(deck_path, args.max_concurrent_pages)
-    print(deck_path)
-    print(f"run_id={deck['run_id']}")
-    print(f"pages={deck['page_count']}")
-    print(f"max_concurrent_pages={deck['max_concurrent_pages']}")
+    payload = {
+        "deck_manifest": str(deck_path),
+        "run_id": deck["run_id"],
+        "pages": deck["page_count"],
+        "max_concurrent_pages": deck["max_concurrent_pages"],
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(deck_path)
+        print(f"run_id={deck['run_id']}")
+        print(f"pages={deck['page_count']}")
+        print(f"max_concurrent_pages={deck['max_concurrent_pages']}")
 
 
 if __name__ == "__main__":

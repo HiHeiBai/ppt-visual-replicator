@@ -151,6 +151,7 @@ The manifest is not a summary of a separately authored `page.pptx`. It is the bu
 
 Must contain:
 
+- `speed_profile`: `fast`, `balanced`, or `strict`
 - `slide`
 - `content_box`
 - `source`
@@ -218,8 +219,10 @@ Text-size fitting:
 
 - `path`: the image path as referenced in `images[]`.
 - `source`: the file the asset was produced from (for separated assets and clean bases this is typically `source.png` or the recorded asset sheet; for formulas the `.tex` file). The referenced file must exist.
-- `source_type`: exactly one of `asset-sheet-separated`, `imagegen`, `latex-rendered-formula`, `user-provided`, `user-approved-rasterization`. No other value passes validation.
+- `source_type`: exactly one of `asset-sheet-separated`, `imagegen`, `latex-rendered-formula`, `profile-rasterized-region`, `user-provided`, `user-approved-rasterization`. No other value passes validation.
 - `provenance_note`: a non-empty explanation of how the asset was produced.
+
+`profile-rasterized-region` is allowed only when `speed_profile` is `fast` or `balanced`. It also requires `region_reason`, must represent a self-contained screenshot/photo/chart-image/complex-illustration region, and must never cover the complete slide behind editable text. Produce it with `reconstruction/scripts/extract-page-region.py`.
 
 Validation keyword-scans the free text of `visual_inventory` and `asset_provenance` entries:
 

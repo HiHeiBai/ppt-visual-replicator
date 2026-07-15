@@ -264,17 +264,15 @@ def doctor(args):
         "and references."
     )
     print(
-        "paddle approval rejection: ask the user to authorize OCR and explain that it corrects "
-        "text boxes, font sizes, and size groups so reconstructed PPT text sizing stays stable."
+        "OCR enhancement: a PaddleOCR token improves recognized text and block boundaries, but "
+        "it is optional. Without one, continue with builtin-ink geometry hints plus the original "
+        "native text ledger; do not block, skip, or downgrade editable reconstruction."
     )
     if hints["paddle_token"] == "unset":
         print(
-            "text hints: ASK THE USER once — a free PaddleOCR token makes text hints content-aware "
-            "(recognized text + cleaner blocks, noticeably better text fidelity). The free personal "
-            "quota is currently more than enough for this skill, so applying is risk-free with no "
-            "extra cost. They can apply at "
-            "{url} and you run `{cmd}`; or they can choose to continue with the offline detector. "
-            "Wait for their choice before reconstructing pages, then do not ask again.".format(
+            "text hints: PaddleOCR is not configured. Continue with builtin-ink geometry hints and "
+            "the source PPTX ledger; do not pause reconstruction. A user may optionally configure "
+            "PaddleOCR later for improved recognition at {url} with `{cmd}` and regenerate hints.".format(
                 url=hints["apply_url"], cmd=hints["configure_command"]
             )
         )

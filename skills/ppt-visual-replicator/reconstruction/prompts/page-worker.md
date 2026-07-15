@@ -9,6 +9,11 @@ Run dir: {{RUN_DIR}}
 Page id: {{PAGE_ID}}
 Page dir: {{PAGE_DIR}}
 Source image: {{SOURCE_IMAGE}}
+Original content image: {{ORIGINAL_SOURCE_IMAGE}}
+Speed profile: {{SPEED_PROFILE}}
+Page route: {{PAGE_ROUTE}}
+Shared asset index: {{SHARED_ASSETS_INDEX}}
+Canonical duplicate page dir: {{CANONICAL_PAGE_DIR}}
 
 You own only this Page dir. Do not edit deck_manifest.json, page_jobs.json, notes_manifest.json, final outputs, the original input, or any other page directory.
 
@@ -18,7 +23,7 @@ MANDATORY FIRST ACTION — before looking at the source image, before any decisi
 - {{SKILL_ROOT}}/references/cli-helper.md — editppt command syntax and examples.
 
 Hard rules (reminders only; the details and rationale live in the references above):
-1. Every non-text foreground visual object must be separated through the `editppt image edit --image <source.png>` asset-sheet workflow per page-decision-tree.md section 2. There is no fallback: no native-shape/emoji/text-symbol approximation, no direct source.png crops, no downgrade to a warning.
+1. Follow the declared speed profile. In `strict`, every non-text foreground visual object uses the asset-sheet workflow. In `balanced` or `fast`, first reuse the deck shared asset index; a self-contained screenshot, photo, chart image, or complex illustration may use `{{SKILL_ROOT}}/scripts/extract-page-region.py` and `source_type: profile-rasterized-region`. Main text and structural objects remain native. No profile permits a complete-slide raster background with editable text over it.
 2. Execute the three steps in order: (1) background recognition and repair, (2) foreground asset separation, (3) native element reconstruction. Do not consume the text hints in your page dir before the step-1/2 decisions are recorded.
 3. manifest.json is the authoritative build source for page validation and final deck assembly. Build page.pptx and preview.png from manifest.json with the deterministic runtime, never with separate page-local PowerPoint code that bypasses the manifest.
 4. All box_px / points_px / polygon_px values are source.png pixels. Reuse page_request.json.slide and page_request.json.content_box unchanged — do not convert the page to 16:9 or recalculate the canvas; the runtime maps source-pixel coordinates into content_box. Positioned objects without coordinates are page failures.
@@ -28,14 +33,18 @@ Image backend: before any image generation or image editing, use the `editppt im
 
 Goal: rebuild the source page as object-level editable PowerPoint. Do not invent an object-source strategy outside `page-decision-tree.md`.
 
+Use `{{ORIGINAL_SOURCE_IMAGE}}` as text/content authority when the prepared source is a generated redraw. Set `manifest.json.speed_profile` to `{{SPEED_PROFILE}}`. Read `{{SHARED_ASSETS_INDEX}}` when it exists; copy a selected matching asset into this page directory and preserve its provenance instead of generating it again. Do not edit the shared asset directory.
+
+If `Canonical duplicate page dir` is not `none`, this page is an exact rendered-PNG duplicate. Wait until that canonical page has `validation.json` with top-level `passed: true`, reuse its manifest and page-local assets, update `page_id`, `run_id`, `source`, and profile fields from the current `page_request.json`, then rebuild and validate in this page directory. Do not run image generation or image editing for an exact duplicate.
+
 If the page dir already contains artifacts (manifest.json, page.pptx, validation.json, assets, ...) from a previous failed attempt, treat them as untrusted: run the full decision process yourself and re-derive every artifact. Never flip a leftover validation.json to `passed: true` or return leftover outputs without having rebuilt and re-verified them — the previous attempt failed for a reason recorded in its validation.json; read it.
 
 Work through the page in this order:
 1. Build the page inventory (Pre-Decision Checklist in page-decision-tree.md).
 2. Decide the background (page-decision-tree.md section 1) and record `background_strategy`.
-3. Decide and separate foreground assets (section 2). Run step-1/2 image jobs serially with `editppt image generate` or `editppt image edit`; do not use a batch interface. Put icons/foreground objects onto one sparse asset sheet when they fit, with generous gaps between objects for clean splitting; create multiple sheets only when one sheet cannot fit them. After each selected output, record and process it with `editppt image import` and `editppt image process-sheet`.
+3. Decide foreground asset sources (section 2). Reuse matching shared assets first. In strict mode, or for non-eligible objects, run page-local image jobs serially with `editppt image generate` or `editppt image edit`; do not use a batch interface. In fast/balanced mode, extract eligible self-contained regions with `extract-page-region.py`, keeping their main placement in `box_px` and recording `profile-rasterized-region` provenance with `region_reason`. Put remaining icons/foreground objects onto one sparse asset sheet when they fit. After each selected generated output, record and process it with `editppt image import` and `editppt image process-sheet`.
 4. Rebuild native text, shapes, and tables (section 3). Fill `text_boxes` from the measured text hints per section 3.1; render formulas with `editppt formula render-latex` per section 3.2.
-5. Write manifest.json following the field contracts in manifest-schema.md, including `text_inventory`, `visual_inventory`, `background_strategy`, `quality_checks`, and positioned `text_boxes`/`images`/`shapes`.
+5. Write manifest.json following the field contracts in manifest-schema.md, including `speed_profile`, `text_inventory`, `visual_inventory`, `background_strategy`, `quality_checks`, and positioned `text_boxes`/`images`/`shapes`.
 6. Build the artifacts with the deterministic runtime: `editppt page build {{PAGE_DIR}}` (writes page.pptx and preview.png from manifest.json), then `editppt page contact-sheet {{PAGE_DIR}}`, then `editppt page validate {{PAGE_DIR}}` — it runs the same manifest-contract checks `editppt run record` will run, so fix every reported issue here, inside the page.
 
 The Page dir must contain when you return:

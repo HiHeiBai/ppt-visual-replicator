@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from pptx_inspect import InputError, inspect_pptx
-from prepare_direct_page import DirectRunError, prepare_direct_page
+from prepare_direct_page import DirectRunError, is_generated_run_artifact, prepare_direct_page
 from render_source_pages import SourceRenderError, render_pptx_to_pngs
 
 
@@ -21,6 +21,7 @@ class DirectDeckError(RuntimeError):
 
 
 SPEED_PROFILES = ("fast", "balanced", "strict")
+SOURCE_RENDERERS = ("auto", "quicklook", "libreoffice")
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -61,16 +62,24 @@ def _as_reference_slides(value: int | Sequence[int] | None) -> list[int]:
 def _request_contract(
     ledger: dict[str, Any],
     *,
+    target_slide: int | None,
     reference_image: str | Path | Sequence[str | Path] | None,
     reference_slide: int | Sequence[int] | None,
+    reference_user_supplied: bool,
     style_brief: str | None,
     source_dpi: int,
     strict_text_protection: bool,
     speed_profile: str,
     full_page_imagegen: bool,
     style_contract: str | Path | None,
+    source_renderer: str,
 ) -> dict[str, Any]:
     reference_images = _as_reference_images(reference_image)
+    if reference_images and not reference_user_supplied:
+        raise DirectDeckError(
+            "reference images require --reference-user-supplied; generated or prior-run images "
+            "must never become style references"
+        )
     reference_slides = _as_reference_slides(reference_slide)
     if reference_slides and len(reference_slides) != len(reference_images):
         raise DirectDeckError(
@@ -81,22 +90,31 @@ def _request_contract(
         path = Path(image).expanduser().resolve()
         if path.suffix.lower() != ".png" or not path.is_file() or not path.stat().st_size:
             raise DirectDeckError(f"reference image must be a readable PNG: {path}")
+        if is_generated_run_artifact(path):
+            raise DirectDeckError(
+                f"refusing generated or preview output as a style reference: {path}; "
+                "use a user-supplied reference image or a JSON style contract instead"
+            )
         reference_inputs.append(
             {
                 "path": str(path),
                 "sha256": _sha256(path),
                 "source_slide": reference_slides[index] if reference_slides else None,
+                "origin": "user-supplied",
             }
         )
     contract = {
         "target_sha256": ledger["sha256"],
+        "target_slide": target_slide,
         "source_dpi": int(source_dpi),
         "style_brief": style_brief.strip() if style_brief else None,
         "strict_text_protection": bool(strict_text_protection),
         "speed_profile": speed_profile,
+        "source_renderer": source_renderer,
         "full_page_imagegen": bool(full_page_imagegen),
         "style_contract": None,
         "references": reference_inputs,
+        "reference_user_supplied": bool(reference_user_supplied),
     }
     if style_contract is not None:
         path = Path(style_contract).expanduser().resolve()
@@ -273,14 +291,17 @@ def prepare_direct_deck(
     target: str | Path,
     run_dir: str | Path,
     *,
+    target_slide: int | None = None,
     reference_image: str | Path | Sequence[str | Path] | None = None,
     reference_slide: int | Sequence[int] | None = None,
+    reference_user_supplied: bool = False,
     style_brief: str | None = None,
     source_dpi: int = 192,
     strict_text_protection: bool = False,
     speed_profile: str = "balanced",
     full_page_imagegen: bool = False,
     style_contract: str | Path | None = None,
+    source_renderer: str = "auto",
     resume: bool = False,
     renderer: Callable[..., dict[str, Any]] = render_pptx_to_pngs,
 ) -> dict[str, Any]:
@@ -289,20 +310,32 @@ def prepare_direct_deck(
         raise DirectDeckError(
             f"speed profile must be one of {', '.join(SPEED_PROFILES)}: {speed_profile}"
         )
+    if source_renderer not in SOURCE_RENDERERS:
+        raise DirectDeckError(
+            "source renderer must be one of "
+            f"{', '.join(SOURCE_RENDERERS)}: {source_renderer}"
+        )
     try:
         ledger = inspect_pptx(target)
     except InputError as exc:
         raise DirectDeckError(str(exc)) from exc
+    if target_slide is not None:
+        available = {int(slide["slide_number"]) for slide in ledger["slides"]}
+        if target_slide not in available:
+            raise DirectDeckError(f"target slide does not exist: {target_slide}")
     request_contract = _request_contract(
         ledger,
+        target_slide=target_slide,
         reference_image=reference_image,
         reference_slide=reference_slide,
+        reference_user_supplied=reference_user_supplied,
         style_brief=style_brief,
         source_dpi=source_dpi,
         strict_text_protection=strict_text_protection,
         speed_profile=speed_profile,
         full_page_imagegen=full_page_imagegen,
         style_contract=style_contract,
+        source_renderer=source_renderer,
     )
     if destination.exists():
         if not resume:
@@ -320,13 +353,46 @@ def prepare_direct_deck(
 
     destination.mkdir(parents=True)
     try:
-        render_report = renderer(
-            ledger["path"],
-            destination / "source-pages",
-            dpi=source_dpi,
-            ledger=ledger,
-        )
-        _write_json(destination / "source-ledger.json", ledger)
+        # Quick Look is more faithful for an individual slide, but it creates
+        # a complete temporary PPTX and launches once per page. For a fast
+        # deck run, use the already-supported one-pass LibreOffice/PDF route
+        # unless the caller explicitly requested another renderer.
+        effective_renderer = source_renderer
+        if source_renderer == "auto" and speed_profile == "fast" and ledger["slide_count"] > 1:
+            effective_renderer = "libreoffice"
+        try:
+            render_report = renderer(
+                ledger["path"],
+                destination / "source-pages",
+                dpi=source_dpi,
+                ledger=ledger,
+                first_slide=target_slide,
+                last_slide=target_slide,
+                renderer=effective_renderer,
+            )
+        except SourceRenderError:
+            # A fast run must not become unavailable because the batch route
+            # is missing or rejects a particular deck. Auto mode can retain
+            # compatibility by falling back to the previous Quick Look path.
+            if source_renderer != "auto" or effective_renderer != "libreoffice":
+                raise
+            render_report = renderer(
+                ledger["path"],
+                destination / "source-pages",
+                dpi=source_dpi,
+                ledger=ledger,
+                first_slide=target_slide,
+                last_slide=target_slide,
+                renderer="quicklook",
+            )
+            render_report["fallback_from"] = "libreoffice"
+        selected_slides = [
+            slide
+            for slide in ledger["slides"]
+            if target_slide is None or int(slide["slide_number"]) == target_slide
+        ]
+        run_ledger = {**ledger, "slide_count": len(selected_slides), "slides": selected_slides}
+        _write_json(destination / "source-ledger.json", run_ledger)
         if style_contract is not None:
             shutil.copy2(Path(style_contract).expanduser().resolve(), destination / "style-contract.json")
         (destination / "shared-assets").mkdir(parents=True)
@@ -349,10 +415,12 @@ def prepare_direct_deck(
                 source_image=page["path"],
                 reference_image=reference_image,
                 reference_slide=reference_slide,
+                reference_user_supplied=reference_user_supplied,
                 style_brief=style_brief,
                 style_contract=style_contract,
                 strict_text_protection=strict_text_protection,
                 run_dir=page_dir,
+                ledger=ledger,
             )
             page_manifest["inputs"]["source"].update(
                 {
@@ -402,9 +470,11 @@ def prepare_direct_deck(
         "status": "prepared",
         "target_pptx": ledger["path"],
         "target_sha256": ledger["sha256"],
-        "slide_count": ledger["slide_count"],
+        "slide_count": len(page_runs),
+        "target_slide_numbers": [int(page["target_slide"]) for page in page_runs],
         "style_mode": style_mode,
         "speed_profile": speed_profile,
+        "source_renderer": source_renderer,
         "text_protection_mode": "strict-native" if strict_text_protection else "visual-ocr",
         "style_brief": style_brief.strip() if style_brief else None,
         "style_contract": "style-contract.json" if style_contract is not None else None,
@@ -424,18 +494,34 @@ def prepare_direct_deck(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Render a target PPTX once and prepare every slide for direct image generation."
+        description="Render a target PPTX and prepare a selected slide or complete deck for direct image generation."
     )
     parser.add_argument("--target", required=True)
+    parser.add_argument(
+        "--target-slide",
+        type=int,
+        help="Prepare one selected source slide as a one-page direct run. Omit for the complete deck.",
+    )
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--reference-image", action="append")
     parser.add_argument("--reference-slide", action="append", type=int)
+    parser.add_argument(
+        "--reference-user-supplied",
+        action="store_true",
+        help="Required when passing a reference image; never use this for a generated or prior-run page.",
+    )
     parser.add_argument("--style-brief")
     parser.add_argument(
         "--style-contract",
         help="Optional JSON file that locks deck-level colors, typography, and reference-content rules.",
     )
     parser.add_argument("--source-dpi", type=int, default=192)
+    parser.add_argument(
+        "--source-renderer",
+        choices=SOURCE_RENDERERS,
+        default="auto",
+        help="Source page renderer. In a multi-page fast run, auto uses one batch LibreOffice render and falls back to Quick Look.",
+    )
     parser.add_argument("--strict-text-protection", action="store_true")
     parser.add_argument(
         "--speed-profile",
@@ -457,14 +543,17 @@ def main() -> int:
     manifest = prepare_direct_deck(
         args.target,
         args.run_dir,
+        target_slide=args.target_slide,
         reference_image=args.reference_image,
         reference_slide=args.reference_slide,
+        reference_user_supplied=args.reference_user_supplied,
         style_brief=args.style_brief,
         source_dpi=args.source_dpi,
         strict_text_protection=args.strict_text_protection,
         speed_profile=args.speed_profile,
         full_page_imagegen=args.full_page_imagegen,
         style_contract=args.style_contract,
+        source_renderer=args.source_renderer,
         resume=args.resume,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

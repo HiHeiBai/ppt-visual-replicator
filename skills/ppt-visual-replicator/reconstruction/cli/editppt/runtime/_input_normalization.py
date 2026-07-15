@@ -284,7 +284,7 @@ def default_output_name(input_paths):
     return f"{stem}_edited.pptx"
 
 
-def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=None, dpi=180):
+def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=None, dpi=180, output_name=None):
     input_paths = [Path(path).resolve() for path in inputs]
     job_dir = Path(job_dir).resolve() if job_dir else default_job_dir(out_root, input_paths).resolve()
     input_dir = job_dir / "input"
@@ -323,7 +323,9 @@ def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=No
                 if source_pptx != copied[0]:
                     shutil.copy2(source_pptx, input_dir / source_pptx.name)
                 rendered_pdf = convert_office_to_pdf(copied[0], tmp_dir)
-                sources = render_pdf_pages(rendered_pdf, pages_dir, args.dpi)
+                # normalize_inputs() is also called programmatically, so use
+                # its explicit DPI contract rather than argparse state.
+                sources = render_pdf_pages(rendered_pdf, pages_dir, dpi)
         pages = [page_record(job_dir, i, source, copied[0], i) for i, source in enumerate(sources, start=1)]
     elif suffixes <= IMG_EXTS:
         input_type = "image" if len(copied) == 1 else "images"
@@ -349,7 +351,7 @@ def normalize_inputs(inputs, out_root="output/image-to-editable-ppt", job_dir=No
         "inputs": [path.relative_to(job_dir).as_posix() for path in copied],
         "pages": pages,
         "notes_manifest": notes_manifest_path.relative_to(job_dir).as_posix(),
-        "output": default_output_name(copied),
+        "output": output_name or default_output_name(copied),
         "validation": "validation.json",
     }
     deck_manifest_path = job_dir / "deck_manifest.json"

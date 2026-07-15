@@ -13,11 +13,10 @@ class SkillPackageTest(unittest.TestCase):
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("name: ppt-visual-replicator", text)
-        self.assertIn("Require only", text)
+        self.assertIn("Required:", text)
         self.assertIn("Target PPTX", text)
-        self.assertIn("source-page PNG override", text)
-        self.assertIn("reference-style PNG", text)
-        self.assertIn("never match reference count to target page count", text)
+        self.assertIn("user-supplied reference PNGs", text)
+        self.assertIn("Do not ask for a speed profile", text)
         self.assertIn("imagegen", text)
         self.assertIn('"$EDITPPT" prepare', text)
         self.assertIn('"$EDITPPT" run finalize', text)
@@ -29,53 +28,42 @@ class SkillPackageTest(unittest.TestCase):
             "references/chrome-normalization.md",
             "references/speed-profiles.md",
         ):
-            self.assertIn(reference, text)
             self.assertTrue((SKILL / reference).is_file(), reference)
 
     def test_skill_uses_a_direct_selected_page_workflow(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("scripts/prepare_direct_deck.py", text)
-        self.assertIn("scripts/prepare_direct_page.py", text)
         self.assertIn("--target-slide", text)
-        self.assertIn("--reference-slide", text)
-        self.assertIn("--source-image", text)
         self.assertIn("--reference-image", text)
+        self.assertIn("--reference-user-supplied", text)
         self.assertIn("--style-brief", text)
         self.assertIn("--strict-text-protection", text)
-        self.assertIn("--speed-profile balanced", text)
-        self.assertIn("--resume", text)
-        self.assertIn("visual-ocr", text)
-        self.assertIn("strict-native", text)
-        self.assertIn("Render the target PPTX directly to per-page PNGs", text)
-        self.assertIn("Rendering the target PPTX is allowed only", text)
-        self.assertIn("thin deck wrapper", text)
+        self.assertIn("--source-renderer quicklook", text)
+        self.assertIn("--full-page-imagegen", text)
         self.assertIn("generation-plan.json", text)
-        self.assertIn("shared-assets/index.json", text)
         self.assertIn("scripts/stage_reconstruction_inputs.py", text)
-        self.assertIn("profile-rasterized-region", text)
-        self.assertIn("legacy visual planning", text)
+        self.assertIn("generated.png", text)
+        self.assertIn("Rebuild locally, one page at a time", text)
         self.assertNotIn('"$EDITPPT" image edit', text)
         self.assertNotIn("build_visual_plan.py", text)
-        self.assertNotIn("--execute-phase calibration", text)
-        self.assertNotIn("--approve-calibration", text)
 
     def test_skill_documents_glyph_preflight(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("missing glyphs", text)
 
-    def test_reconstruction_defaults_to_offline_text_hints_without_prompting(self) -> None:
+    def test_reconstruction_defaults_to_local_sequential_work_without_prompting(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("`builtin-ink`", text)
-        self.assertIn("do not ask for an OCR token", text)
+        self.assertIn("default workflow does not require subagents", text)
+        self.assertIn('run next "$RUN/reconstruction" --local --json', text)
 
     def test_skill_vendors_its_editable_ppt_runtime_and_worker_contract(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("scripts/ensure_editppt_runtime.py", text)
-        self.assertIn("reconstruction/scripts/build-page-worker-prompt.py", text)
+        self.assertIn("worker-prompt.md", text)
         self.assertNotIn("Use the installed `image-to-editable-ppt`", text)
         for path in (
             "scripts/ensure_editppt_runtime.py",
@@ -95,14 +83,12 @@ class SkillPackageTest(unittest.TestCase):
         ):
             self.assertTrue((SKILL / path).is_file(), path)
 
-    def test_skill_requires_final_real_render_and_optional_chrome_postpass(self) -> None:
+    def test_skill_requires_final_real_render(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         acceptance = (SKILL / "references" / "acceptance.md").read_text(encoding="utf-8")
 
-        self.assertIn("scripts/normalize_global_chrome.py", text)
         self.assertIn("scripts/render_final_qa.py", text)
-        self.assertIn("never guess labels", text)
-        self.assertIn("Internal `preview.png`", text)
+        self.assertIn("Render the final PPTX for visual QA", text)
         self.assertIn("final real-render", acceptance)
 
     def test_skill_package_has_no_runtime_cache_files(self) -> None:

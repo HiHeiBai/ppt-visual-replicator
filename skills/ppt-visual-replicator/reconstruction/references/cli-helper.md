@@ -6,7 +6,7 @@ Usage principles:
 
 - If a deterministic action can be completed with `editppt`, call the CLI directly instead of rewriting it as a temporary Python script.
 - When full parameters are needed, read `editppt <command> --help` or `editppt image <command> --help` first.
-- In network-restricted agents, `editppt prepare`/`editppt run hints` with a PaddleOCR token and `editppt image generate/edit` need network approval. The approval and user-interaction policy lives in `SKILL.md` Entry Contract and Phase 1.
+- In network-restricted agents, `editppt prepare`/`editppt run hints` with a PaddleOCR token and `editppt image generate/edit` need network approval. Follow the current `SKILL.md` workflow and its delivery gates.
 
 ## Command Tree
 
@@ -92,7 +92,7 @@ After the CLI is available, run local runtime checks:
 ```bash
 editppt setup
 editppt doctor
-editppt config --api-key "<key>" --base-url "<openai-compatible-base-url>" --model "<image-model>"
+OPENAI_API_KEY=... editppt config --api-key-from-env --base-url "<openai-compatible-base-url>" --model "<image-model>"
 ```
 
 Write `editppt config` only when API fallback is needed or when the user explicitly provides a third-party image API. Do not write API keys into the project directory, run directory, prompts, or manifests.
@@ -100,10 +100,10 @@ Write `editppt config` only when API fallback is needed or when the user explici
 Optional but recommended on first use: configure a PaddleOCR-VL token. The offline detector only measures text geometry (where and how large); with a token the hints also carry recognized text content and cleaner block boundaries. Store it next to the other credentials:
 
 ```bash
-editppt config --paddle-ocr-token "<token>"
+PADDLE_OCR_TOKEN=... editppt config --paddle-ocr-token-from-env
 ```
 
-`editppt doctor` reports the current text-hints backend; without a token everything still works through the built-in offline detector. When and how to ask the user about the token — including the application URL and the regenerate step — is defined in `SKILL.md` Phase 1.
+`editppt doctor` reports the current text-hints backend; without a token everything still works through the built-in offline detector. Configure a token only through `PADDLE_OCR_TOKEN=... editppt config --paddle-ocr-token-from-env`, then regenerate hints.
 
 ## Run Commands
 
@@ -112,33 +112,27 @@ editppt prepare input.png
 editppt prepare input.pdf
 ```
 
-Purpose: normalize a single image, multiple images, a PDF, or an image-based PPTX into a run directory and generate `deck_manifest.json`, `page_jobs.json`, `notes_manifest.json`, plus per-page `pages/page_NNN/source.png`, `page_request.json`, and text hints.
+Purpose: normalize a single image, multiple images, a PDF, or an image-based PPTX into a run directory and generate `deck_manifest.json`, `page_jobs.json`, `notes_manifest.json`, plus per-page `pages/page_NNN/source.png` and `page_request.json`. It also generates text hints unless `--no-text-hints` is supplied. For a large fast deck, use `--max-concurrent-pages 3 --no-text-hints` and let each page worker create hints just before native-text reconstruction.
 
-When a PaddleOCR token is configured, `prepare` may submit the input pages to PaddleOCR for content-aware text hints. In a sandboxed or approval-gated environment, request network approval up front for this command instead of accepting a DNS/sandbox failure followed by lower-quality `builtin-ink` fallback; see `SKILL.md` Phase 1 for the approval-rejection policy.
-
-```bash
-editppt run next <run> --json
-```
-
-Purpose: read current run state and return the next stage. `stage=rebuild_page_locally` appears only when the run has exactly one pending page; the parent agent must build the page prompt, claim local execution with `run dispatch --local`, and rebuild the page itself using that prompt. `stage=dispatch_pages` lists `suggested_pages` that must each be dispatched to a page worker. `stage=wait` means wait for dispatched pages to complete; slow dispatched workers remain active and must not be reset or replaced because they occupy a slot. `stage=finalize` means proceed to final assembly. `stage=configure_backend` appears only when `deck_manifest.json.image_backend` is missing; follow the returned `next_command`.
-
-Generate the page-worker prompt with the skill script before spawning a worker:
+When a PaddleOCR token is configured, `prepare` may submit the input pages to PaddleOCR for content-aware text hints. In a sandboxed or approval-gated environment, request network approval up front; otherwise continue with the built-in offline detector.
 
 ```bash
-python <skill-root>/scripts/build-page-worker-prompt.py <run> --page page_001 --out <absolute-run-dir>/pages/page_001/worker-prompt.md
+editppt run next <run> --local --json
 ```
+
+Purpose: read current run state, create the selected page-local `worker-prompt.md`, and return the next stage. With `--local`, it selects one pending page so a deck can be reconstructed sequentially without a subagent. Without it, `stage=dispatch_pages` lists pages for worker dispatch. `stage=wait` means wait for dispatched pages to complete; `stage=finalize` means proceed to final assembly. `stage=configure_backend` appears only when `deck_manifest.json.image_backend` is missing; follow the returned `next_command`.
 
 ```bash
 editppt run dispatch <run> --page page_001 --agent-id <worker-id> --prompt-file <absolute-run-dir>/pages/page_001/worker-prompt.md
 ```
 
-For a single-page local rebuild, use:
+For a local rebuild, use the `prompt_file` printed by `run next`:
 
 ```bash
 editppt run dispatch <run> --page page_001 --agent-id main --prompt-file <absolute-run-dir>/pages/page_001/worker-prompt.md --local
 ```
 
-Purpose: record that a page has been dispatched to a worker or claimed for single-page local reconstruction. For worker dispatch, first create the worker with the current environment's available subagent/multi-agent tool, then run this command. For local reconstruction, `--local` is allowed only when the run has exactly one page. `--prompt-file` uses the same absolute path as the prompt-builder `--out`. `--agent-id` is any stable identifier for the execution; the same id must be reused at `run record`.
+Purpose: record that a page has been dispatched to a worker or claimed for local reconstruction. For worker dispatch, first create the worker with the current environment's available subagent/multi-agent tool, then run this command. With `--local`, any pending page can be reconstructed locally; process deck pages one at a time. `--agent-id` is any stable identifier for the execution; the same id must be reused at `run record`.
 
 ```bash
 editppt run record <run> --page page_001 --agent-id <worker-id>
@@ -150,7 +144,7 @@ Purpose: after the page reconstructor writes its required outputs (see `manifest
 editppt run reset <run> --page page_001 --agent-id <worker-id> --confirm-lost
 ```
 
-Purpose: return a dispatched or recorded page to `pending`, clearing its dispatch and result records, so a new worker can be dispatched. Recorded pages can be reset with only `--page`. Dispatched pages require `--agent-id` plus `--confirm-lost`, and the id must match the recorded dispatch. Use this only when a worker returned a failed page, `run record` rejected the outputs, the runtime reports a terminal worker state, the user cancels that worker, or repeated reachability checks prove the worker is lost. The failure-handling policy is in `SKILL.md` Phase 3.
+Purpose: return a dispatched or recorded page to `pending`, clearing its dispatch and result records, so a new worker can be dispatched. Recorded pages can be reset with only `--page`. Dispatched pages require `--agent-id` plus `--confirm-lost`, and the id must match the recorded dispatch. Use this only when a worker returned a failed page, `run record` rejected the outputs, the runtime reports a terminal worker state, the user cancels that worker, or repeated reachability checks prove the worker is lost.
 
 ```bash
 editppt run finalize <run>
@@ -186,9 +180,9 @@ Purpose: validate `page.pptx` against `manifest.json` with the same manifest-con
 editppt run hints <run>
 ```
 
-Purpose: regenerate `text_hints.json`/`text_hints.png` for every page of a prepared run — for example right after configuring a PaddleOCR token, so the current run gets content-aware hints without re-running prepare.
+Purpose: regenerate `text_hints.json`/`text_hints.png` for every page of a prepared run — for example right after configuring a PaddleOCR token, so the current run gets content-aware hints without re-running prepare. Use `--no-overlay` when only geometry JSON is needed.
 
-When used with a configured PaddleOCR token, this command calls the external OCR service. If the runtime requires approval for network access, request it with the task-local conversion-data justification from `SKILL.md`; see `SKILL.md` Phase 1 for the approval-rejection policy.
+When used with a configured PaddleOCR token, this command calls the external OCR service. If the runtime requires approval for network access, request it with the task-local conversion-data justification from the current skill workflow.
 
 ```bash
 editppt page hints pages/page_001

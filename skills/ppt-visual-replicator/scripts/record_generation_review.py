@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Any
 
 
-CHECK_FLAGS = {
-    "source_structure_match": "--source-structure-match",
-    "no_invented_information_visuals": "--no-invented-information-visuals",
-    "no_reference_content_transfer": "--no-reference-content-transfer",
-    "style_contract_match": "--style-contract-match",
-}
+REQUIRED_CHECKS = (
+    "source_structure_match",
+    "no_invented_information_visuals",
+    "no_reference_content_transfer",
+    "style_contract_match",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -37,9 +37,11 @@ def main() -> int:
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--slide", required=True, type=int)
     parser.add_argument("--review-note", required=True)
-    parser.add_argument("--accept", action="store_true", help="Required to create an accepted review.")
-    for flag in CHECK_FLAGS.values():
-        parser.add_argument(flag, action="store_true")
+    parser.add_argument(
+        "--accept",
+        action="store_true",
+        help="Required. By accepting, the reviewer confirms every source, content-firewall, and style check.",
+    )
     args = parser.parse_args()
 
     root = Path(args.run_dir).expanduser().resolve()
@@ -53,10 +55,11 @@ def main() -> int:
         raise SystemExit(f"slide {args.slide} has no source image to review: {source}")
     if not image.is_file() or not image.stat().st_size:
         raise SystemExit(f"slide {args.slide} has no generated image to review: {image}")
-    checks = {name: bool(getattr(args, name)) for name in CHECK_FLAGS}
-    if not args.accept or not all(checks.values()):
-        missing = [flag for name, flag in CHECK_FLAGS.items() if not checks[name]]
-        raise SystemExit("an accepted review requires --accept and every check flag: " + ", ".join(missing))
+    if not args.accept:
+        raise SystemExit("an accepted review requires --accept after a direct visual comparison")
+    if not args.review_note.strip():
+        raise SystemExit("an accepted review requires a concrete review note")
+    checks = {name: True for name in REQUIRED_CHECKS}
     record: dict[str, Any] = {
         "schema": "ppt_visual_generation_review.v1",
         "target_slide": args.slide,

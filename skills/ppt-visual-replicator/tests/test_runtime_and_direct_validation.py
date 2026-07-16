@@ -99,10 +99,18 @@ class VisualGateTests(unittest.TestCase):
                 encoding="utf-8",
             )
             gate = {
+                "schema": "ppt_visual_page_gate.v2",
                 "passed": True,
                 "manual_accept": True,
+                "visual_accept": True,
+                "content_accept": True,
                 "source_sha256": sha256(source),
+                "content_source_sha256": sha256(source),
                 "page_pptx_sha256": sha256(page_pptx),
+                "checks": {
+                    "visual_reference_match": True,
+                    "original_content_reviewed": True,
+                },
             }
             (page_dir / "visual-gate.json").write_text(json.dumps(gate), encoding="utf-8")
 
@@ -111,6 +119,42 @@ class VisualGateTests(unittest.TestCase):
             )
 
             self.assertEqual(evidence["path"], "pages/page_001/visual-gate.json")
+
+    def test_direct_run_rejects_a_visual_only_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            direct_root = Path(temp_dir) / "run"
+            run_dir = direct_root / "reconstruction"
+            page_dir = run_dir / "pages" / "page_001"
+            source = direct_root / "pages" / "slide-001" / "source-content.png"
+            page_pptx = page_dir / "page.pptx"
+            source.parent.mkdir(parents=True)
+            page_dir.mkdir(parents=True)
+            source.write_bytes(b"original-source")
+            page_pptx.write_bytes(b"rebuilt-page")
+            (direct_root / "deck-run.json").write_text(
+                json.dumps({"pages": [{"source_image": "pages/slide-001/source-content.png"}]}),
+                encoding="utf-8",
+            )
+            gate = {
+                "schema": "ppt_visual_page_gate.v2",
+                "passed": True,
+                "manual_accept": True,
+                "visual_accept": True,
+                "content_accept": False,
+                "source_sha256": sha256(source),
+                "content_source_sha256": sha256(source),
+                "page_pptx_sha256": sha256(page_pptx),
+                "checks": {
+                    "visual_reference_match": True,
+                    "original_content_reviewed": False,
+                },
+            }
+            (page_dir / "visual-gate.json").write_text(json.dumps(gate), encoding="utf-8")
+
+            with self.assertRaisesRegex(SystemExit, "original-content comparison"):
+                validate_direct_visual_gate(
+                    run_dir, {"page_id": "page_001", "page_index": 1}, page_dir, page_pptx
+                )
 
 
 if __name__ == "__main__":

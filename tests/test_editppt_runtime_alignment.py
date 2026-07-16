@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,14 @@ SPEC = importlib.util.spec_from_file_location("build_pptx_from_manifest", RUNTIM
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(MODULE)
+
+sys.path.insert(0, str(RUNTIME.parent))
+VALIDATE_SPEC = importlib.util.spec_from_file_location(
+    "validate_pptx_relationships", RUNTIME.parent / "validate_pptx.py"
+)
+VALIDATE_MODULE = importlib.util.module_from_spec(VALIDATE_SPEC)
+assert VALIDATE_SPEC and VALIDATE_SPEC.loader
+VALIDATE_SPEC.loader.exec_module(VALIDATE_MODULE)
 
 
 class RuntimeAlignmentTest(unittest.TestCase):
@@ -46,6 +55,14 @@ class RuntimeAlignmentTest(unittest.TestCase):
         self.assertIn('algn="ctr"', xml)
         self.assertIn('anchor="ctr"', xml)
         self.assertEqual(MODULE.preview_text_align("ctr"), "center")
+
+    def test_package_absolute_relationship_targets_are_normalized(self) -> None:
+        resolved = VALIDATE_MODULE.resolve_target(
+            "ppt/_rels/presentation.xml.rels",
+            "/ppt/slides/slide1.xml",
+        )
+
+        self.assertEqual(resolved, "ppt/slides/slide1.xml")
 
 
 if __name__ == "__main__":

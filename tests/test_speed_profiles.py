@@ -247,6 +247,9 @@ class SpeedProfileTest(unittest.TestCase):
             self.assertIn("Speed profile: balanced", prompt)
             self.assertIn("shared-assets/index.json", prompt)
             self.assertIn(manifest["pages"][0]["source_image"], prompt)
+            self.assertIn("generated redraw is the visual authority", prompt)
+            self.assertIn("--content-source", prompt)
+            self.assertIn("Do not use `editppt image generate`", prompt)
             self.assertNotIn("{{SPEED_PROFILE}}", prompt)
 
     def test_region_extractor_rejects_full_slide_and_writes_partial_png(self) -> None:

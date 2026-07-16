@@ -581,6 +581,8 @@ def rel_source_part(rels_name):
 def resolve_target(rels_name, target):
     if not target or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target):
         return None
+    if target.startswith("/"):
+        return posixpath.normpath(target.lstrip("/"))
     source = rel_source_part(rels_name)
     return posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
 

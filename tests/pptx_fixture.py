@@ -31,7 +31,7 @@ def _slide_xml(texts, *, pictures=0, table=False, chart=False):
 """
 
 
-def write_fixture_pptx(path: Path, slides=None) -> Path:
+def write_fixture_pptx(path: Path, slides=None, *, absolute_slide_targets: bool = False) -> Path:
     slides = slides or [
         {"texts": ["Quarterly Review 2026"]},
         {"texts": ["目录", "研究背景", "研究结果"]},
@@ -54,7 +54,10 @@ def write_fixture_pptx(path: Path, slides=None) -> Path:
 </p:presentation>
 """
     relationships = "".join(
-        f'<Relationship Id="rId{i}" Type="slide" Target="slides/slide{i}.xml"/>'
+        (
+            f'<Relationship Id="rId{i}" Type="slide" '
+            f'Target="{f"/ppt/slides/slide{i}.xml" if absolute_slide_targets else f"slides/slide{i}.xml"}"/>'
+        )
         for i in range(1, len(slides) + 1)
     )
     rels = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -75,4 +78,3 @@ def write_fixture_pptx(path: Path, slides=None) -> Path:
                 ),
             )
     return path
-

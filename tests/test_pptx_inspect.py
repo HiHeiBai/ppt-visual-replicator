@@ -72,6 +72,18 @@ class PptxInspectTest(unittest.TestCase):
 
         self.assertEqual(result["slides"][1]["family_hint"], "image_content")
 
+    def test_accepts_package_absolute_slide_relationships(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = write_fixture_pptx(
+                Path(temp_dir) / "walnut-style.pptx",
+                absolute_slide_targets=True,
+            )
+
+            result = inspect_pptx(path)
+
+        self.assertEqual(result["slide_count"], 4)
+        self.assertEqual(result["slides"][0]["part"], "ppt/slides/slide1.xml")
+
 
 if __name__ == "__main__":
     unittest.main()

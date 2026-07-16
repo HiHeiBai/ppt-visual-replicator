@@ -12,6 +12,8 @@ The order exists because steps 1-2 decide object sources and step 3 consumes tho
 
 The page-worker prompt declares one speed profile. `strict` uses the complete asset-separation contract below. `balanced` and `fast` keep the same decision order but may preserve a self-contained screenshot, photo, chart image, or complex illustration as a positioned `profile-rasterized-region`. This exception never applies to a complete slide, main editable text, ordinary cards, tables, arrows, or structural shapes. Use the supplied shared deck asset library before any new page-local image job.
 
+For a direct-redraw route, `source.png` is the accepted `generated.png`: it is the visual authority, not raw material for a second design pass. The original `source-content.png` and ledger remain the content authority. Do not call `editppt image generate` for a direct-redraw page. Use `editppt image edit` only to remove provisional generated text or separate visual objects already present in `source.png`; prompts must preserve their exact design and must not beautify, simplify, replace, or invent them. The final page must pass the generated-reference visual comparison and the original-content comparison.
+
 Contents:
 
 - Common failure mode: false progress
@@ -70,13 +72,13 @@ An existing background region may be reused as-is only when all of these hold:
 
 ### 1.3 Backgrounds That Need Image Tool Repair
 
-Use `editppt image edit --image <source.png>` for background repair or clean bases when:
+Use `editppt image edit --image <source.png>` for source-faithful background repair or clean bases when:
 
 - Complex photos, spaces, real product images, complex dashboards, or complex illustrated backgrounds are occluded by foreground text or icons.
 - Occluded areas need completion after removing text, labels, icons, stickers, or hand-drawn marks.
 - Background and foreground are stuck together and native shapes cannot preserve source identity.
 
-The clean base target is the same background with the to-be-rebuilt foreground removed — not a new image with a similar theme. The edit prompt must treat the source as both the edit target and strict visual reference, and must state:
+The clean base target is the same background with the to-be-rebuilt foreground removed — not a new image with a similar theme. On a direct-redraw route, `editppt image generate` is forbidden. The edit prompt must treat the accepted generated source as both the edit target and strict visual reference, and must state:
 
 - Preserve: original aspect ratio, composition, perspective, object positions, colors, lighting, materials, textures, depth of field, and background identity.
 - Remove: readable text, labels, numbers, icons, stickers, badges, hand-drawn marks, and decorative objects that will be rebuilt later.
@@ -107,7 +109,7 @@ First reuse an exact matching asset from the deck-level shared asset index. Do n
 
 In `strict` mode, every non-text foreground visual object must use image-edit separation. In `balanced` and `fast` modes, a self-contained screenshot, photo, complex chart image, or complex illustration may instead use `reconstruction/scripts/extract-page-region.py`. Record `speed_profile`, `source_type: profile-rasterized-region`, the source image, the positioned box, and a non-empty `region_reason`. Main titles, body text, numbers, labels outside the preserved region, and structural objects remain native.
 
-When the strict path applies, separate every non-text foreground visual object through the `editppt image edit --image <source.png>` asset-sheet workflow, including:
+When the strict path applies, separate every non-text foreground visual object through the `editppt image edit --image <source.png>` asset-sheet workflow. For a direct-redraw route this is separation of the accepted generated visual, never a second redraw. It includes:
 
 - Foreground photos, foreground screenshots, video covers, foreground image blocks, map fragments, chart-image fragments, and rectangular illustrations.
 - Icons, pictograms, symbols, logo-like marks.

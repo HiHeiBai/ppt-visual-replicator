@@ -112,7 +112,7 @@ editppt prepare input.png
 editppt prepare input.pdf
 ```
 
-Purpose: normalize a single image, multiple images, a PDF, or an image-based PPTX into a run directory and generate `deck_manifest.json`, `page_jobs.json`, `notes_manifest.json`, plus per-page `pages/page_NNN/source.png` and `page_request.json`. It also generates text hints unless `--no-text-hints` is supplied. For a large fast deck, use `--max-concurrent-pages 3 --no-text-hints` and let each page worker create hints just before native-text reconstruction.
+Purpose: normalize a single image, multiple images, a PDF, or an image-based PPTX into a run directory and generate `deck_manifest.json`, `page_jobs.json`, `notes_manifest.json`, plus per-page `pages/page_NNN/source.png` and `page_request.json`. It also generates text hints unless `--no-text-hints` is supplied. For a large deck, `--no-text-hints` can defer hint creation until each page worker begins native-text reconstruction.
 
 When a PaddleOCR token is configured, `prepare` may submit the input pages to PaddleOCR for content-aware text hints. In a sandboxed or approval-gated environment, request network approval up front; otherwise continue with the built-in offline detector.
 

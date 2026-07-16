@@ -65,7 +65,7 @@ def _load_normalized(path: Path, size: tuple[int, int]) -> Image.Image:
 def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     source_small = source.resize((128, 72), Image.Resampling.LANCZOS)
     rendered_small = rendered.resize((128, 72), Image.Resampling.LANCZOS)
-    pixel_values = zip(source_small.get_flattened_data(), rendered_small.get_flattened_data())
+    pixel_values = zip(source_small.getdata(), rendered_small.getdata())
     pixel_distance = sum(
         abs(left_channel - right_channel)
         for left, right in pixel_values
@@ -76,13 +76,13 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     rendered_structure = rendered.convert("L").resize((64, 36), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(1))
     structure_distance = sum(
         abs(left - right)
-        for left, right in zip(source_structure.get_flattened_data(), rendered_structure.get_flattened_data())
+        for left, right in zip(source_structure.getdata(), rendered_structure.getdata())
     ) / (64 * 36)
 
     source_ink = source.convert("L").resize((320, 180), Image.Resampling.LANCZOS)
     rendered_ink = rendered.convert("L").resize((320, 180), Image.Resampling.LANCZOS)
     def projection(image: Image.Image) -> tuple[list[int], list[int], int]:
-        values = list(image.get_flattened_data())
+        values = list(image.getdata())
         ink = [value < 200 for value in values]
         rows = [sum(ink[top * 320 : (top + 1) * 320]) for top in range(180)]
         columns = [sum(ink[left + top * 320] for top in range(180)) for left in range(320)]
@@ -97,8 +97,8 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     title_source = source.crop((0, 0, source.width, int(source.height * 0.32)))
     title_rendered = rendered.crop((0, 0, rendered.width, int(rendered.height * 0.32)))
     title_pixels = zip(
-        title_source.resize((160, 51), Image.Resampling.LANCZOS).get_flattened_data(),
-        title_rendered.resize((160, 51), Image.Resampling.LANCZOS).get_flattened_data(),
+        title_source.resize((160, 51), Image.Resampling.LANCZOS).getdata(),
+        title_rendered.resize((160, 51), Image.Resampling.LANCZOS).getdata(),
     )
     title_pixel_distance = sum(
         abs(left_channel - right_channel)
@@ -109,7 +109,7 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     title_rendered_structure = title_rendered.convert("L").resize((80, 26), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(1))
     title_structure_distance = sum(
         abs(left - right)
-        for left, right in zip(title_source_structure.get_flattened_data(), title_rendered_structure.get_flattened_data())
+        for left, right in zip(title_source_structure.getdata(), title_rendered_structure.getdata())
     ) / (80 * 26)
     return {
         "pixel_mean_distance": round(pixel_distance, 3),
@@ -123,17 +123,28 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
 def verify_page_visual(
     source_path: str | Path,
     *,
+    content_source_path: str | Path | None = None,
     page_pptx: str | Path | None,
     rendered_image: str | Path | None,
     out_dir: str | Path,
     accept: bool,
+    accept_visual: bool | None = None,
+    accept_content: bool | None = None,
+    native_seed: bool = False,
 ) -> dict[str, Any]:
     source = Path(source_path).expanduser().resolve()
+    content_source = (
+        Path(content_source_path).expanduser().resolve()
+        if content_source_path is not None
+        else source
+    )
     output = Path(out_dir).expanduser().resolve()
     if output.exists():
         raise VisualGateError(f"visual QA output already exists: {output}")
     if not source.is_file():
-        raise VisualGateError(f"source page does not exist: {source}")
+        raise VisualGateError(f"visual reference does not exist: {source}")
+    if not content_source.is_file():
+        raise VisualGateError(f"content reference does not exist: {content_source}")
     if bool(page_pptx) == bool(rendered_image):
         raise VisualGateError("provide exactly one of page_pptx or rendered_image")
     output.mkdir(parents=True)
@@ -154,6 +165,7 @@ def verify_page_visual(
             renderer = "provided-image"
             page_sha256 = None
         source_image = _load_normalized(source, (1280, 720))
+        content_source_image = _load_normalized(content_source, (1280, 720))
         rendered_image_value = _load_normalized(rendered, (1280, 720))
         source_copy = output / "source.png"
         source_image.save(source_copy)
@@ -166,6 +178,16 @@ def verify_page_visual(
             ImageChops.difference(source_image, rendered_image_value)
         ).enhance(4)
         difference.save(output / "difference.png")
+        content_source_image.save(output / "content-source.png")
+        content_side_by_side = Image.new("RGB", (2560, 720), "white")
+        content_side_by_side.paste(content_source_image, (0, 0))
+        content_side_by_side.paste(rendered_image_value, (1280, 0))
+        content_side_by_side.save(output / "content-side-by-side.png")
+        content_difference = ImageEnhance.Contrast(
+            ImageChops.difference(content_source_image, rendered_image_value)
+        ).enhance(4)
+        content_difference.save(output / "content-difference.png")
+        content_metrics = _metrics(content_source_image, rendered_image_value)
         thresholds = {
             "pixel_mean_distance": 18.0,
             "structure_distance": 7.0,
@@ -173,31 +195,60 @@ def verify_page_visual(
             "title_pixel_mean_distance": 18.0,
             "title_structure_distance": 7.0,
         }
-        metric_passed = all(metrics[name] <= threshold for name, threshold in thresholds.items())
-        passed = bool(accept and metric_passed)
+        # A native seed intentionally keeps source-authoritative editable text
+        # and title typography. In that mode the generated redraw governs the
+        # coarse composition, while the original page governs exact text/ink.
+        visual_metric_names = (
+            ("pixel_mean_distance", "structure_distance")
+            if native_seed
+            else tuple(thresholds)
+        )
+        metric_passed = all(
+            metrics[name] <= thresholds[name] for name in visual_metric_names
+        )
+        content_metric_passed = all(
+            content_metrics[name] <= threshold for name, threshold in thresholds.items()
+        )
+        visual_accept = bool(accept if accept_visual is None else accept_visual)
+        content_accept = bool(accept if accept_content is None else accept_content)
+        checks = {
+            "visual_reference_match": bool(visual_accept and metric_passed),
+            "original_content_reviewed": bool(content_accept and content_metric_passed),
+        }
+        passed = all(checks.values())
         report = {
-            "schema": "ppt_visual_page_gate.v1",
+            "schema": "ppt_visual_page_gate.v2",
             "passed": passed,
-            "manual_accept": bool(accept),
+            "manual_accept": bool(visual_accept and content_accept),
+            "visual_accept": visual_accept,
+            "content_accept": content_accept,
             "renderer": renderer,
+            "native_seed": native_seed,
             "source": str(source),
             "source_sha256": _sha256(source),
+            "content_source": str(content_source),
+            "content_source_sha256": _sha256(content_source),
             "page_pptx": str(Path(page_pptx).expanduser().resolve()) if page_pptx else None,
             "page_pptx_sha256": page_sha256,
             "rendered": str(rendered),
             "rendered_sha256": _sha256(rendered),
             "metrics": metrics,
+            "content_metrics": content_metrics,
             "thresholds": thresholds,
+            "checks": checks,
             "evidence": {
                 "source": "source.png",
                 "rendered": "rendered.png",
                 "side_by_side": "side-by-side.png",
                 "difference": "difference.png",
+                "content_source": "content-source.png",
+                "content_side_by_side": "content-side-by-side.png",
+                "content_difference": "content-difference.png",
             },
             "failure_reason": (
                 None
                 if passed
-                else "visual metrics exceed a threshold or the reviewer did not explicitly accept the Quick Look comparison"
+                else "the generated-reference visual metrics failed, or the reviewer did not explicitly accept both the generated visual and original-content comparisons"
             ),
         }
         _write_json(output / "visual-gate.json", report)
@@ -209,22 +260,49 @@ def verify_page_visual(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compare a rebuilt one-slide PPTX to the original page with a macOS Quick Look visual gate."
+        description="Compare a rebuilt one-slide PPTX to the generated visual reference and original content reference."
     )
-    parser.add_argument("--source", required=True)
+    parser.add_argument("--source", required=True, help="Accepted generated redraw; visual authority.")
+    parser.add_argument(
+        "--content-source",
+        help="Original source-content.png; content authority. Defaults to --source for legacy non-direct runs.",
+    )
     source_group = parser.add_mutually_exclusive_group(required=True)
     source_group.add_argument("--page-pptx")
     source_group.add_argument("--rendered-image", help="Test-only image input; normal reconstruction must use --page-pptx.")
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--accept", action="store_true", help="Record that the side-by-side and difference images were inspected.")
+    parser.add_argument(
+        "--native-seed",
+        action="store_true",
+        help="Use coarse generated-visual metrics and source-authoritative exact text/title metrics.",
+    )
+    parser.add_argument(
+        "--accept",
+        action="store_true",
+        help="Legacy shorthand that accepts both comparisons after inspection.",
+    )
+    parser.add_argument(
+        "--accept-visual",
+        action="store_true",
+        help="Confirm the generated-reference side-by-side and difference images were inspected.",
+    )
+    parser.add_argument(
+        "--accept-content",
+        action="store_true",
+        help="Confirm the original-content side-by-side and difference images were inspected.",
+    )
     args = parser.parse_args()
     try:
         result = verify_page_visual(
             args.source,
+            content_source_path=args.content_source,
             page_pptx=args.page_pptx,
             rendered_image=args.rendered_image,
             out_dir=args.out_dir,
             accept=args.accept,
+            accept_visual=(args.accept or args.accept_visual),
+            accept_content=(args.accept or args.accept_content),
+            native_seed=args.native_seed,
         )
     except VisualGateError as exc:
         raise SystemExit(str(exc)) from exc

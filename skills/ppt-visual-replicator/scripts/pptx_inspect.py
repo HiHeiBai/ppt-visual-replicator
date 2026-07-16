@@ -78,7 +78,11 @@ def _slide_paths(archive: ZipFile, presentation: ET.Element) -> list[str]:
         rel_id = slide_id.attrib.get(f"{{{R_NS}}}id")
         if not rel_id or rel_id not in targets:
             raise InputError(f"presentation slide relationship is missing: {rel_id}")
-        path = posixpath.normpath(posixpath.join("ppt", targets[rel_id]))
+        target = targets[rel_id]
+        if target.startswith("/"):
+            path = posixpath.normpath(target.lstrip("/"))
+        else:
+            path = posixpath.normpath(posixpath.join("ppt", target))
         if path not in archive.namelist():
             raise InputError(f"slide part is missing: {path}")
         paths.append(path)

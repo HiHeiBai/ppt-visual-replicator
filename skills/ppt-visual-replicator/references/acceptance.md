@@ -3,15 +3,14 @@
 ## Direct redraw
 
 - The run declares either `visual-ocr` or `strict-native` text protection. Native text extraction is not a blocking prerequisite in default `visual-ocr` mode.
-- The run declares `fast`, `balanced`, or `strict`; its `generation-plan.json` covers every target page exactly once.
+- `generation-plan.json` covers every target page exactly once and requires built-in imagegen for every page.
 - Automatically rendered source pages match the requested target slide count and aspect ratio, or a supplied source-content PNG override is readable at the expected aspect ratio.
 - The render report records the source PPTX, rendered slide numbers, dimensions, hashes, DPI, and renderer tools.
 - Any supplied shared reference-style PNGs are readable.
-- Every page routed to `generate` has one recorded content input, zero or more recorded shared style inputs, one prompt, and one output image. `direct-rebuild` and `reuse` pages do not require a generated image.
+- Every page has one recorded content input, zero or more recorded shared style inputs, one prompt, and one reviewed `generated.png` output.
 - The generated slide retains target claims, numbers, charts, tables, citations, page markers, and document codes; it does not copy reference wording, facts, logos, or identifiers.
 - With references, the generated slide visibly adopts their common palette, typography character, spacing, decorative language, and hierarchy. Without references, it follows the explicit style brief or the selected coherent default style.
 - Reference images are deck-level samples. Their number is independent of the target slide count, and a single reference may be reused for the whole deck.
-- Exact duplicate source PNGs identify one canonical page; duplicate pages do not make additional image calls.
 - The shared asset index records recurring visual assets once and page workers reuse them before requesting page-local separation.
 
 ## Editable PPT
@@ -24,7 +23,7 @@
 - Title font family, color, weight, size, and placement come from `title-styles.json` unless a user-selected style contract explicitly declares a `title_system` override for that page role. A generic deck palette or imagegen output is never title authority.
 - The editable preview remains visually faithful to the original source page as well as the generated visual reference; structural validation alone is not enough.
 - Complex charts, paper screenshots, and scientific illustrations may remain independent image objects.
-- In `fast` and `balanced`, eligible self-contained visual regions use `profile-rasterized-region` with a recorded reason. They never cover the complete slide behind editable text. In `strict`, every foreground visual follows the asset-sheet separation contract.
+- Eligible self-contained screenshot, photo, chart-image, or complex-illustration regions may use `source-faithful-region` with a recorded reason. They never cover the complete slide behind editable text; other foreground visuals follow the asset-sheet separation contract.
 - Text alignment and vertical anchoring use valid PowerPoint values; the finalized PPTX can be parsed and rendered by a real presentation renderer.
 
 ## Final real-render QA

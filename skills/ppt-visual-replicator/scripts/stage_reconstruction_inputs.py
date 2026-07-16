@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the mixed redraw/direct/reuse page plan for editppt preparation."""
+"""Stage reviewed generated PNGs for editppt preparation."""
 
 from __future__ import annotations
 
@@ -36,27 +36,15 @@ def _link_or_copy(source: Path, destination: Path) -> str:
 def _source_for_page(
     run_dir: Path,
     page: dict[str, Any],
-    by_slide: dict[int, dict[str, Any]],
-) -> tuple[Path, str, int]:
+) -> tuple[Path, str]:
     generation = page.get("generation") or {}
     action = generation.get("action")
     slide_number = int(page["target_slide"])
-    if action == "generate":
-        source = run_dir / page["generated_image"]
-        return source, "generated", slide_number
-    if action == "direct-rebuild":
-        source = run_dir / page["source_image"]
-        return source, "source-content", slide_number
-    if action == "reuse":
-        canonical_slide = int(generation.get("canonical_slide") or 0)
-        canonical = by_slide.get(canonical_slide)
-        if not canonical or canonical_slide == slide_number:
-            raise StageInputsError(
-                f"slide {slide_number} has an invalid canonical slide: {canonical_slide}"
-            )
-        source, source_kind, _ = _source_for_page(run_dir, canonical, by_slide)
-        return source, f"reused-{source_kind}", canonical_slide
-    raise StageInputsError(f"slide {slide_number} has an unknown generation action: {action}")
+    if action != "generate":
+        raise StageInputsError(
+            f"slide {slide_number} violates the fixed pipeline; expected generation action 'generate', got: {action}"
+        )
+    return run_dir / page["generated_image"], "generated"
 
 
 def stage_reconstruction_inputs(
@@ -82,13 +70,12 @@ def stage_reconstruction_inputs(
         Path(out_dir).expanduser().resolve() if out_dir else root / "reconstruction-inputs"
     )
     destination.mkdir(parents=True, exist_ok=True)
-    by_slide = {int(page["target_slide"]): page for page in pages}
     staged = []
     expected_names = set()
 
     for page in pages:
         slide_number = int(page["target_slide"])
-        source, source_kind, canonical_slide = _source_for_page(root, page, by_slide)
+        source, source_kind = _source_for_page(root, page)
         if not source.is_file() or not source.stat().st_size:
             raise StageInputsError(
                 f"slide {slide_number} is not ready; required image is missing: {source}"
@@ -102,7 +89,6 @@ def stage_reconstruction_inputs(
                 "input": str(output.relative_to(root)) if output.is_relative_to(root) else str(output),
                 "source": str(source.relative_to(root)) if source.is_relative_to(root) else str(source),
                 "source_kind": source_kind,
-                "canonical_slide": canonical_slide,
                 "materialization": materialization,
             }
         )
@@ -113,7 +99,6 @@ def stage_reconstruction_inputs(
 
     report = {
         "schema": "ppt_visual_reconstruction_inputs.v1",
-        "speed_profile": manifest.get("speed_profile", "strict"),
         "page_count": len(staged),
         "output_dir": str(destination),
         "pages": staged,
@@ -125,7 +110,7 @@ def stage_reconstruction_inputs(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Stage the page images selected by a PPT visual generation plan."
+        description="Stage reviewed generated PNGs for editable reconstruction."
     )
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--out-dir")

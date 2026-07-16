@@ -16,7 +16,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("Required:", text)
         self.assertIn("Target PPTX", text)
         self.assertIn("user-supplied reference PNGs", text)
-        self.assertIn("Do not ask for a speed profile", text)
+        self.assertNotIn("speed profile", text.lower())
         self.assertIn("imagegen", text)
         self.assertIn('"$EDITPPT" prepare', text)
         self.assertIn('"$EDITPPT" run finalize', text)
@@ -26,7 +26,6 @@ class SkillPackageTest(unittest.TestCase):
             "references/content-protection.md",
             "references/acceptance.md",
             "references/chrome-normalization.md",
-            "references/speed-profiles.md",
         ):
             self.assertTrue((SKILL / reference).is_file(), reference)
 
@@ -40,9 +39,12 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("--style-brief", text)
         self.assertIn("--strict-text-protection", text)
         self.assertIn("--source-renderer quicklook", text)
-        self.assertIn("--full-page-imagegen", text)
+        self.assertNotIn("--full-page-imagegen", text)
+        self.assertIn("For every prepared page", text)
         self.assertIn("generation-plan.json", text)
         self.assertIn("scripts/stage_reconstruction_inputs.py", text)
+        self.assertIn("scripts/validate_generation_delivery.py", text)
+        self.assertIn("scripts/seed_native_reconstruction.py", text)
         self.assertIn("generated.png", text)
         self.assertIn("Rebuild locally, one page at a time", text)
         self.assertNotIn('"$EDITPPT" image edit', text)
@@ -58,6 +60,21 @@ class SkillPackageTest(unittest.TestCase):
 
         self.assertIn("default workflow does not require subagents", text)
         self.assertIn('run next "$RUN/reconstruction" --local --json', text)
+
+    def test_reconstruction_scopes_image_edit_and_requires_dual_reference_qa(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        worker = (SKILL / "reconstruction" / "prompts" / "page-worker.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("may use `editppt image edit` only", text)
+        self.assertIn("dual-reference visual gate", text)
+        self.assertIn("generated redraw is the visual authority", worker)
+        self.assertIn("original content image is the content authority", worker)
+        self.assertIn("--accept-visual", worker)
+        self.assertIn("--accept-content", worker)
+        self.assertIn("--native-seed", worker)
+        self.assertIn("at most two correction iterations", text)
 
     def test_skill_vendors_its_editable_ppt_runtime_and_worker_contract(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
@@ -80,6 +97,7 @@ class SkillPackageTest(unittest.TestCase):
             "reconstruction/cli/editppt/runtime/main.py",
             "scripts/normalize_global_chrome.py",
             "scripts/render_final_qa.py",
+            "scripts/seed_native_reconstruction.py",
         ):
             self.assertTrue((SKILL / path).is_file(), path)
 

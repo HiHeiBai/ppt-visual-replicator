@@ -58,7 +58,7 @@ def validate_page_contract(paths):
 
 
 def validate_direct_visual_gate(run_dir, page, page_dir, page_pptx):
-    """Require an original-source Quick Look comparison for direct deck runs."""
+    """Require generated-visual and original-content comparisons for direct runs."""
     direct_root = run_dir.parent
     deck_run_path = direct_root / "deck-run.json"
     if not deck_run_path.is_file():
@@ -69,10 +69,15 @@ def validate_direct_visual_gate(run_dir, page, page_dir, page_pptx):
     if page_index <= 0 or page_index > len(direct_pages):
         raise SystemExit("direct-run page metadata is incomplete; cannot verify the original-source visual gate")
     direct_page = direct_pages[page_index - 1]
-    source = direct_root / str(direct_page.get("source_image") or "")
+    content_source = direct_root / str(direct_page.get("source_image") or "")
+    visual_source = page_dir / "source.png"
+    if not visual_source.is_file():
+        visual_source = content_source
     gate_path = page_dir / "visual-gate.json"
-    if not source.is_file():
-        raise SystemExit(f"direct-run original source is missing for visual gate: {source}")
+    if not content_source.is_file():
+        raise SystemExit(f"direct-run original content source is missing for visual gate: {content_source}")
+    if not visual_source.is_file():
+        raise SystemExit(f"direct-run generated visual source is missing for visual gate: {visual_source}")
     if not gate_path.is_file():
         raise SystemExit(
             f"{page['page_id']} has no visual-gate.json. Run verify_page_visual.py against the original source before recording."
@@ -80,11 +85,25 @@ def validate_direct_visual_gate(run_dir, page, page_dir, page_pptx):
     gate = read_json(gate_path)
     if gate.get("passed") is not True or gate.get("manual_accept") is not True:
         raise SystemExit(f"{page['page_id']} visual gate did not pass; fix visible drift before recording")
-    if gate.get("source_sha256") != sha256_file(source):
-        raise SystemExit(f"{page['page_id']} visual gate used a stale or wrong original source")
+    checks = gate.get("checks") or {}
+    if gate.get("schema") != "ppt_visual_page_gate.v2":
+        raise SystemExit(f"{page['page_id']} visual gate is not the required dual-reference v2 gate")
+    if gate.get("visual_accept") is not True or checks.get("visual_reference_match") is not True:
+        raise SystemExit(f"{page['page_id']} generated-reference visual comparison was not accepted")
+    if gate.get("content_accept") is not True or checks.get("original_content_reviewed") is not True:
+        raise SystemExit(f"{page['page_id']} original-content comparison was not accepted")
+    if gate.get("source_sha256") != sha256_file(visual_source):
+        raise SystemExit(f"{page['page_id']} visual gate used a stale or wrong generated reference")
+    if gate.get("content_source_sha256") != sha256_file(content_source):
+        raise SystemExit(f"{page['page_id']} visual gate used a stale or wrong original content source")
     if gate.get("page_pptx_sha256") != sha256_file(page_pptx):
         raise SystemExit(f"{page['page_id']} visual gate does not match the current page.pptx")
-    return {"path": rel_to_run(run_dir, gate_path), "sha256": sha256_file(gate_path)}
+    return {
+        "path": rel_to_run(run_dir, gate_path),
+        "sha256": sha256_file(gate_path),
+        "visual_source_sha256": sha256_file(visual_source),
+        "content_source_sha256": sha256_file(content_source),
+    }
 
 
 def main():

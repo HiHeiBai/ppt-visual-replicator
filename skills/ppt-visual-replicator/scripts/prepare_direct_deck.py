@@ -22,7 +22,6 @@ class DirectDeckError(RuntimeError):
     pass
 
 
-SPEED_PROFILES = ("fast", "balanced", "strict")
 SOURCE_RENDERERS = ("auto", "quicklook", "libreoffice")
 
 
@@ -71,8 +70,6 @@ def _request_contract(
     style_brief: str | None,
     source_dpi: int,
     strict_text_protection: bool,
-    speed_profile: str,
-    full_page_imagegen: bool,
     style_contract: str | Path | None,
     source_renderer: str,
 ) -> dict[str, Any]:
@@ -111,9 +108,7 @@ def _request_contract(
         "source_dpi": int(source_dpi),
         "style_brief": style_brief.strip() if style_brief else None,
         "strict_text_protection": bool(strict_text_protection),
-        "speed_profile": speed_profile,
         "source_renderer": source_renderer,
-        "full_page_imagegen": bool(full_page_imagegen),
         "style_contract": None,
         "references": reference_inputs,
         "reference_user_supplied": bool(reference_user_supplied),
@@ -133,76 +128,35 @@ def _request_contract(
     return contract
 
 
-def _generation_route(
-    slide: dict[str, Any], speed_profile: str, full_page_imagegen: bool
-) -> tuple[str, str]:
-    family = str(slide.get("family_hint") or "unknown")
-    if full_page_imagegen:
-        return "generate", "full-page imagegen is required for every unique page"
-    if speed_profile == "strict":
-        return "generate", "strict profile redraws every unique page"
-    if speed_profile == "fast":
-        if family == "cover":
-            return "generate", "fast profile redraws the cover as the deck style seed"
-        return "direct-rebuild", "fast profile preserves the page and skips whole-slide imagegen"
-    if family in {"cover", "chart_figure"}:
-        return "generate", f"balanced profile redraws {family} pages"
-    return (
-        "direct-rebuild",
-        f"balanced profile preserves {family} content and applies shared deck chrome during reconstruction",
-    )
-
-
 def _build_generation_plan(
     destination: Path,
     ledger: dict[str, Any],
     page_runs: list[dict[str, Any]],
     *,
-    speed_profile: str,
     style_fingerprint: str,
-    full_page_imagegen: bool,
 ) -> dict[str, Any]:
     slide_by_number = {int(item["slide_number"]): item for item in ledger["slides"]}
-    canonical_by_hash: dict[str, int] = {}
-    counts = {"generate": 0, "direct-rebuild": 0, "reuse": 0}
     pages = []
 
     for page in page_runs:
         slide_number = int(page["target_slide"])
         source_sha256 = str(page["source_sha256"])
         slide = slide_by_number[slide_number]
-        canonical_slide = canonical_by_hash.get(source_sha256)
-        if canonical_slide is None:
-            canonical_by_hash[source_sha256] = slide_number
-            action, reason = _generation_route(slide, speed_profile, full_page_imagegen)
-            reconstruction_action = "rebuild"
-        else:
-            action = "reuse"
-            reason = f"source PNG is identical to slide {canonical_slide}"
-            reconstruction_action = "reuse-canonical"
-
         prompt_path = destination / page["prompt"]
         cache_key = _stable_digest(
             {
                 "source_sha256": source_sha256,
                 "prompt_sha256": _sha256(prompt_path),
                 "style_fingerprint": style_fingerprint,
-                "speed_profile": speed_profile,
-                "action": action,
             }
         )
         generation = {
-            "action": action,
-            "reason": reason,
-            "canonical_slide": canonical_slide or slide_number,
+            "action": "generate",
+            "reason": "fixed pipeline requires built-in imagegen for every target page",
             "cache_key": cache_key,
-            "status": "ready" if action == "direct-rebuild" else "pending",
+            "status": "pending",
         }
-        reconstruction = {
-            "action": reconstruction_action,
-            "profile": speed_profile,
-            "canonical_slide": canonical_slide or slide_number,
-        }
+        reconstruction = {"action": "rebuild"}
         page.update(
             {
                 "family_hint": slide.get("family_hint"),
@@ -212,11 +166,9 @@ def _build_generation_plan(
         )
         page_run_path = destination / page["run_dir"] / "run.json"
         page_run = json.loads(page_run_path.read_text(encoding="utf-8"))
-        page_run["speed_profile"] = speed_profile
         page_run["generation"] = generation
         page_run["reconstruction"] = reconstruction
         _write_json(page_run_path, page_run)
-        counts[action] += 1
         pages.append(
             {
                 "target_slide": slide_number,
@@ -229,12 +181,10 @@ def _build_generation_plan(
 
     return {
         "schema": "ppt_visual_generation_plan.v1",
-        "speed_profile": speed_profile,
         "summary": {
-            **counts,
+            "generate": len(page_runs),
             "total_pages": len(page_runs),
-            "whole_slide_imagegen_calls": counts["generate"],
-            "whole_slide_imagegen_calls_avoided": counts["direct-rebuild"] + counts["reuse"],
+            "whole_slide_imagegen_calls": len(page_runs),
         },
         "shared_assets": {
             "directory": "shared-assets",
@@ -246,21 +196,12 @@ def _build_generation_plan(
 
 
 def _refresh_resume_status(destination: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    by_slide = {int(page["target_slide"]): page for page in manifest.get("pages", [])}
     complete = True
     for page in manifest.get("pages", []):
         generation = page.get("generation") or {}
         action = generation.get("action")
         if action == "generate":
             ready = (destination / page["generated_image"]).is_file()
-        elif action == "direct-rebuild":
-            ready = True
-        elif action == "reuse":
-            canonical = by_slide.get(int(generation.get("canonical_slide") or 0), {})
-            canonical_action = (canonical.get("generation") or {}).get("action")
-            ready = canonical_action == "direct-rebuild" or bool(
-                canonical and (destination / canonical["generated_image"]).is_file()
-            )
         else:
             ready = False
         generation["status"] = "ready" if ready else "pending"
@@ -300,8 +241,6 @@ def prepare_direct_deck(
     style_brief: str | None = None,
     source_dpi: int = 192,
     strict_text_protection: bool = False,
-    speed_profile: str = "balanced",
-    full_page_imagegen: bool = False,
     style_contract: str | Path | None = None,
     source_renderer: str = "auto",
     force_reconstruct: bool = False,
@@ -309,10 +248,6 @@ def prepare_direct_deck(
     renderer: Callable[..., dict[str, Any]] = render_pptx_to_pngs,
 ) -> dict[str, Any]:
     destination = Path(run_dir).expanduser().resolve()
-    if speed_profile not in SPEED_PROFILES:
-        raise DirectDeckError(
-            f"speed profile must be one of {', '.join(SPEED_PROFILES)}: {speed_profile}"
-        )
     if source_renderer not in SOURCE_RENDERERS:
         raise DirectDeckError(
             "source renderer must be one of "
@@ -352,8 +287,6 @@ def prepare_direct_deck(
         style_brief=style_brief,
         source_dpi=source_dpi,
         strict_text_protection=strict_text_protection,
-        speed_profile=speed_profile,
-        full_page_imagegen=full_page_imagegen,
         style_contract=style_contract,
         source_renderer=source_renderer,
     )
@@ -367,7 +300,7 @@ def prepare_direct_deck(
         existing_fingerprint = (manifest.get("request_contract") or {}).get("fingerprint")
         if existing_fingerprint != request_contract["fingerprint"]:
             raise DirectDeckError(
-                "existing run does not match the target, references, style contract/brief, DPI, text mode, or speed profile"
+                "existing run does not match the target, references, style contract/brief, DPI, or text mode"
             )
         return _refresh_resume_status(destination, manifest)
 
@@ -402,39 +335,15 @@ def prepare_direct_deck(
     try:
         _write_json(destination / "native-editability.json", native_check)
         _write_json(destination / "title-styles.json", title_styles)
-        # Quick Look is more faithful for an individual slide, but it creates
-        # a complete temporary PPTX and launches once per page. For a fast
-        # deck run, use the already-supported one-pass LibreOffice/PDF route
-        # unless the caller explicitly requested another renderer.
-        effective_renderer = source_renderer
-        if source_renderer == "auto" and speed_profile == "fast" and ledger["slide_count"] > 1:
-            effective_renderer = "libreoffice"
-        try:
-            render_report = renderer(
-                ledger["path"],
-                destination / "source-pages",
-                dpi=source_dpi,
-                ledger=ledger,
-                first_slide=target_slide,
-                last_slide=target_slide,
-                renderer=effective_renderer,
-            )
-        except SourceRenderError:
-            # A fast run must not become unavailable because the batch route
-            # is missing or rejects a particular deck. Auto mode can retain
-            # compatibility by falling back to the previous Quick Look path.
-            if source_renderer != "auto" or effective_renderer != "libreoffice":
-                raise
-            render_report = renderer(
-                ledger["path"],
-                destination / "source-pages",
-                dpi=source_dpi,
-                ledger=ledger,
-                first_slide=target_slide,
-                last_slide=target_slide,
-                renderer="quicklook",
-            )
-            render_report["fallback_from"] = "libreoffice"
+        render_report = renderer(
+            ledger["path"],
+            destination / "source-pages",
+            dpi=source_dpi,
+            ledger=ledger,
+            first_slide=target_slide,
+            last_slide=target_slide,
+            renderer=source_renderer,
+        )
         selected_slides = [
             slide
             for slide in ledger["slides"]
@@ -449,7 +358,6 @@ def prepare_direct_deck(
             destination / "shared-assets" / "index.json",
             {
                 "schema": "ppt_visual_shared_assets.v1",
-                "speed_profile": speed_profile,
                 "assets": [],
             },
         )
@@ -509,9 +417,7 @@ def prepare_direct_deck(
         destination,
         ledger,
         page_runs,
-        speed_profile=speed_profile,
         style_fingerprint=request_contract["fingerprint"],
-        full_page_imagegen=full_page_imagegen,
     )
     _write_json(destination / "generation-plan.json", generation_plan)
     manifest = {
@@ -522,7 +428,6 @@ def prepare_direct_deck(
         "slide_count": len(page_runs),
         "target_slide_numbers": [int(page["target_slide"]) for page in page_runs],
         "style_mode": style_mode,
-        "speed_profile": speed_profile,
         "source_renderer": source_renderer,
         "text_protection_mode": "strict-native" if strict_text_protection else "visual-ocr",
         "style_brief": style_brief.strip() if style_brief else None,
@@ -536,7 +441,7 @@ def prepare_direct_deck(
         "shared_assets": "shared-assets/index.json",
         "generation_summary": generation_plan["summary"],
         "pages": page_runs,
-        "next_action": "Follow generation-plan.json, reuse shared assets, stage reconstruction inputs, then reconstruct in slide order.",
+        "next_action": "Generate and review every page in generation-plan.json, stage generated PNGs, then reconstruct in slide order.",
     }
     _write_json(destination / "deck-run.json", manifest)
     return manifest
@@ -570,20 +475,9 @@ def main() -> int:
         "--source-renderer",
         choices=SOURCE_RENDERERS,
         default="auto",
-        help="Source page renderer. In a multi-page fast run, auto uses one batch LibreOffice render and falls back to Quick Look.",
+        help="Source page renderer used to create the imagegen content input.",
     )
     parser.add_argument("--strict-text-protection", action="store_true")
-    parser.add_argument(
-        "--speed-profile",
-        choices=SPEED_PROFILES,
-        default="balanced",
-        help="fast minimizes redraws, balanced redraws visual pages, strict redraws every unique page.",
-    )
-    parser.add_argument(
-        "--full-page-imagegen",
-        action="store_true",
-        help="Redraw every unique slide as one complete imagegen page.",
-    )
     parser.add_argument(
         "--force-reconstruct",
         action="store_true",
@@ -605,8 +499,6 @@ def main() -> int:
         style_brief=args.style_brief,
         source_dpi=args.source_dpi,
         strict_text_protection=args.strict_text_protection,
-        speed_profile=args.speed_profile,
-        full_page_imagegen=args.full_page_imagegen,
         style_contract=args.style_contract,
         source_renderer=args.source_renderer,
         force_reconstruct=args.force_reconstruct,

@@ -28,7 +28,7 @@ Optional:
 - A short style brief.
 - Strict text protection for medical, financial, legal, scientific, or number-dense slides.
 
-Do not ask for a speed profile, a style-contract JSON, shared assets, duplicate-page handling, or worker count unless the user explicitly asks for one. They are implementation details, not normal inputs.
+Do not ask for a style-contract JSON, shared assets, or worker count unless the user explicitly asks for one. They are implementation details, not normal inputs.
 
 ## Content rules
 
@@ -66,7 +66,6 @@ python3 scripts/prepare_direct_deck.py \
   --target "target.pptx" \
   --target-slide 34 \
   --run-dir "output/slide-034" \
-  --full-page-imagegen \
   --source-renderer quicklook
 ```
 
@@ -76,7 +75,6 @@ Full deck:
 python3 scripts/prepare_direct_deck.py \
   --target "target.pptx" \
   --run-dir "output/deck" \
-  --full-page-imagegen \
   --source-renderer quicklook
 ```
 
@@ -97,11 +95,13 @@ The command writes these per-page inputs:
 - `generated.png` — the required destination for the selected imagegen result
 - `title-styles.json` — source title font, color, size, weight, and placement authority for native reconstruction
 
+The deck run also writes a static `generation-plan.json`; every target page has action `generate`.
+
 Inspect the source PNG before generating. Stop if it is clipped, has missing glyphs, or does not match the requested slide.
 
 ### 2. Redraw with built-in imagegen
 
-For every page whose `generation-plan.json` action is `generate`:
+For every prepared page:
 
 1. Call the built-in `image_gen` tool. The page's `source-content.png` is the first content/layout input; append only user-supplied reference-style PNGs.
 2. Use the page's `direct-image-prompt.txt` as the prompt.
@@ -109,7 +109,7 @@ For every page whose `generation-plan.json` action is `generate`:
 4. Copy the selected built-in imagegen output from `$CODEX_HOME/generated_images/...` to that page's exact `generated.png` path. A run-specific `generated.png` may be replaced when retrying the same page.
 5. Retry only the failed page, and only for a visible layout/content/style error.
 
-Do not use the imagegen CLI fallback, `editppt image edit`, an imagegen preview, or a prior generated page as a later style reference.
+Do not use the imagegen CLI fallback, `editppt image edit`, an imagegen preview, or a prior generated page to create or replace the page-level `generated.png`. During editable reconstruction only, the vendored page worker may use `editppt image edit` only to separate existing visual objects or remove provisional text from the accepted `generated.png`; it must not redesign, beautify, regenerate, or substitute those objects.
 
 After a page passes visual comparison, record one concise review:
 
@@ -123,7 +123,14 @@ python3 scripts/record_generation_review.py \
 
 `--accept` is the reviewer’s explicit confirmation that structure, content firewall, and style checks all passed. Do not accept a page that fails any of them.
 
-For an exact duplicate source page, reuse the canonical generated PNG only when `generation-plan.json` marks it `reuse`; do not make an extra image call.
+After recording all required page reviews, run the direct-generation gate before reconstruction:
+
+```bash
+RUN="output/deck"  # Use the same path passed to --run-dir.
+python3 scripts/validate_generation_delivery.py --run-dir "$RUN"
+```
+
+Do not continue to reconstruction while this gate reports an unreviewed page, changed PNG, changed source image, or missing review check.
 
 ### 3. Rebuild locally as editable PPTX
 
@@ -138,6 +145,12 @@ python3 scripts/stage_reconstruction_inputs.py --run-dir "$RUN"
   --job-dir "$RUN/reconstruction" \
   --output-name origin_edited.pptx \
   --max-concurrent-pages 1
+
+# For editable PPTX sources, seed native text, shapes, coordinates, and images.
+# This is the default fast path and makes no additional image-model call.
+python3 scripts/seed_native_reconstruction.py \
+  --run-dir "$RUN" \
+  --reconstruction-dir "$RUN/reconstruction"
 ```
 
 Rebuild locally, one page at a time. The default workflow does not require subagents.
@@ -146,9 +159,9 @@ Rebuild locally, one page at a time. The default workflow does not require subag
 "$EDITPPT" run next "$RUN/reconstruction" --local --json
 ```
 
-This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. Follow that local page prompt to create the manifest, restore editable text from the original source/ledger, build the page, and make its contact sheet.
+This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. When `native-manifest-seed.json` exists, build it immediately and refine only the differences visible against the accepted `generated.png`; do not rebuild the page from pixels and do not call `editppt image edit`. The original `source-content.png` and source ledger remain the content authority.
 
-Before `editppt page validate` or `run record`, render the rebuilt one-page PPTX with macOS Quick Look and compare it to the original `source-content.png`. Run the page worker’s required `verify_page_visual.py` command, inspect its side-by-side and difference PNGs, and accept only a passing `visual-gate.json`. Never compare only against `generated.png`: an imagegen redraw can itself shift background color, cards, footers, title wrapping, or spacing.
+Before `editppt page validate` or `run record`, render the rebuilt one-page PPTX with macOS Quick Look and run the required dual-reference visual gate. Compare the render to the accepted `generated.png` for palette, composition, chrome, cards, spacing, and decoration; compare it separately to the original `source-content.png` for content responsibilities, text regions, data visuals, citations, and page identity. Inspect both side-by-side and difference pairs, then accept only a passing `visual-gate.json`. The gate binds both reference hashes and the current page PPTX hash; either missing comparison is a hard failure.
 
 Claim and record the page with the same `agent-id`:
 
@@ -162,7 +175,9 @@ Claim and record the page with the same `agent-id`:
 "$EDITPPT" run record "$RUN/reconstruction" --page page_001 --agent-id main
 ```
 
-Repeat `run next --local` → local rebuild → original-source Quick Look gate → `run record` for each remaining page. Do not dispatch a page before its prompt exists, and do not mark a failed visual or structural validation as recorded.
+Repeat `run next --local` → local rebuild → dual-reference Quick Look gate → `run record` for each remaining page. Do not dispatch a page before its prompt exists, and do not mark a failed visual or structural validation as recorded.
+
+Fail fast: require a first `preview.png` before manual refinement, allow at most two correction iterations, and return a concrete failed `validation.json` instead of leaving a page indefinitely in `dispatched`. A stalled page is a failed run, not a reason to wait for hours.
 
 ### 4. Finalize and prove editability
 
@@ -187,7 +202,7 @@ python3 scripts/render_final_qa.py \
   --out-dir "$RUN/final-render"
 ```
 
-Inspect the selected slide for a one-page run. For a deck, inspect the first, midpoint, last, and every page flagged during reconstruction. Check clipping, text centering, page count/order, data retention, title/footer consistency, and accidental duplicate elements. This final check does not replace the required page-level original-source visual gate.
+Inspect the selected slide for a one-page run. For a deck, inspect the first, midpoint, last, and every page flagged during reconstruction. Check clipping, text centering, page count/order, data retention, title/footer consistency, and accidental duplicate elements. This final check does not replace the required page-level dual-reference visual gate.
 
 ## Delivery
 

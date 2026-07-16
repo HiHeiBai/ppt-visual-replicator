@@ -58,7 +58,9 @@ def validate_generation_delivery(run_dir: str | Path) -> dict[str, Any]:
         page_evidence: dict[str, Any] = {"target_slide": slide, "action": action}
         evidence["pages"].append(page_evidence)
         if action != "generate":
-            page_evidence["review_required"] = False
+            errors.append(
+                f"slide {slide} violates the fixed pipeline; expected generation action 'generate', got: {action}"
+            )
             continue
 
         source = root / str(page.get("source_image") or "")

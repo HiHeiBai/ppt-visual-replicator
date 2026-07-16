@@ -10,11 +10,11 @@ Use one declared text-protection mode for the complete run:
 ## Source rendering boundary
 
 - Render the target PPTX into page PNGs when the user supplies only the PPTX.
-- Use rendered pages as imagegen content/layout inputs, direct-rebuild content authority, and visual comparison evidence.
+- Use rendered pages as imagegen content/layout inputs, content authority, and visual comparison evidence.
 - Validate rendered page count, aspect ratio, PNG readability, missing glyphs, and material clipping before generation.
 - Do not use a rendered full-slide screenshot as the final editable page background with native text layered over it.
-- In `fast` or `balanced`, a self-contained screenshot, photo, chart image, or complex illustration may remain a positioned profile-rasterized region; this exception never applies to the complete slide or main editable text.
-- In strict mode, when the renderer and native PPTX disagree, preserve exact native PPTX text and critical numbers from the ledger and report visible renderer drift.
+- A self-contained screenshot, photo, chart image, or complex illustration may remain a positioned `source-faithful-region`; this exception never applies to the complete slide or main editable text.
+- In `strict-native` text mode, when the renderer and native PPTX disagree, preserve exact native PPTX text and critical numbers from the ledger and report visible renderer drift.
 
 ## Required preservation
 

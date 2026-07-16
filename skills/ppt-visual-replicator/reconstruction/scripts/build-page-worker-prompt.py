@@ -78,11 +78,10 @@ def page_worker_template() -> str:
 
 def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
     context = {
-        "speed_profile": "strict",
         "original_source_image": str(page_dir_for(run_dir, page) / "source.png"),
+        "native_manifest_seed": "none",
+        "native_source_slide": "none",
         "shared_assets_index": "none",
-        "page_route": "strict page-local reconstruction",
-        "canonical_page_dir": "none",
         "title_style_sheet": "none",
         "style_contract": "none",
         "page_family": "content",
@@ -96,28 +95,13 @@ def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
     if page_index < 1 or page_index > len(direct_pages):
         return context
     direct_page = direct_pages[page_index - 1]
-    generation = direct_page.get("generation") or {}
-    reconstruction = direct_page.get("reconstruction") or {}
-    speed_profile = str(direct_run.get("speed_profile") or "strict")
-    canonical_slide = int(reconstruction.get("canonical_slide") or page_index)
     context.update(
         {
-            "speed_profile": speed_profile,
             "original_source_image": str(
                 (run_dir.parent / direct_page["source_image"]).resolve()
             ),
             "shared_assets_index": str(
                 (run_dir.parent / str(direct_run.get("shared_assets") or "shared-assets/index.json")).resolve()
-            ),
-            "page_route": json.dumps(
-                {"generation": generation, "reconstruction": reconstruction},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
-            "canonical_page_dir": (
-                str((run_dir / "pages" / f"page_{canonical_slide:03d}").resolve())
-                if reconstruction.get("action") == "reuse-canonical"
-                else "none"
             ),
             "title_style_sheet": str(
                 (run_dir.parent / str(direct_run.get("title_styles") or "title-styles.json")).resolve()
@@ -128,6 +112,8 @@ def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
                 else "none"
             ),
             "page_family": str(direct_page.get("family_hint") or "content"),
+            "native_manifest_seed": str((page_dir_for(run_dir, page) / "native-manifest-seed.json").resolve()),
+            "native_source_slide": str((page_dir_for(run_dir, page) / "native-source-slide.pptx").resolve()),
         }
     )
     return context
@@ -144,10 +130,9 @@ def build_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
         "{{PAGE_DIR}}": str(page_dir),
         "{{SOURCE_IMAGE}}": str(source_image),
         "{{ORIGINAL_SOURCE_IMAGE}}": workflow["original_source_image"],
-        "{{SPEED_PROFILE}}": workflow["speed_profile"],
+        "{{NATIVE_MANIFEST_SEED}}": workflow["native_manifest_seed"],
+        "{{NATIVE_SOURCE_SLIDE}}": workflow["native_source_slide"],
         "{{SHARED_ASSETS_INDEX}}": workflow["shared_assets_index"],
-        "{{PAGE_ROUTE}}": workflow["page_route"],
-        "{{CANONICAL_PAGE_DIR}}": workflow["canonical_page_dir"],
         "{{TITLE_STYLE_SHEET}}": workflow["title_style_sheet"],
         "{{STYLE_CONTRACT}}": workflow["style_contract"],
         "{{PAGE_FAMILY}}": workflow["page_family"],

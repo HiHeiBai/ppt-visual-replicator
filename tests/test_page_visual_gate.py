@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
@@ -34,7 +35,7 @@ class PageVisualGateTest(unittest.TestCase):
             content = root / "source-content.png"
             rendered = root / "rendered.png"
             write_reference(visual, "#005587")
-            write_reference(content, "#333333", offset=20)
+            write_reference(content, "#005587")
             write_reference(rendered, "#005587")
 
             result = verify_page_visual(
@@ -77,6 +78,80 @@ class PageVisualGateTest(unittest.TestCase):
                 accept_visual=True,
                 accept_content=False,
             )
+
+            self.assertFalse(result["passed"])
+            self.assertFalse(result["checks"]["original_content_reviewed"])
+
+    def test_native_seed_uses_coarse_generated_metrics_and_exact_content_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            visual = root / "generated.png"
+            content = root / "source-content.png"
+            rendered = root / "rendered.png"
+            write_reference(visual, "#005587")
+            write_reference(content, "#333333")
+            write_reference(rendered, "#005587")
+            visual_metrics = {
+                "pixel_mean_distance": 10.0,
+                "structure_distance": 5.0,
+                "ink_projection_distance": 0.9,
+                "title_pixel_mean_distance": 90.0,
+                "title_structure_distance": 90.0,
+            }
+            content_metrics = {
+                "pixel_mean_distance": 2.0,
+                "structure_distance": 1.0,
+                "ink_projection_distance": 0.1,
+                "title_pixel_mean_distance": 2.0,
+                "title_structure_distance": 1.0,
+            }
+
+            with patch("verify_page_visual._metrics", side_effect=[visual_metrics, content_metrics]):
+                result = verify_page_visual(
+                    visual,
+                    content_source_path=content,
+                    page_pptx=None,
+                    rendered_image=rendered,
+                    out_dir=root / "qa",
+                    accept=False,
+                    accept_visual=True,
+                    accept_content=True,
+                    native_seed=True,
+                )
+
+            self.assertTrue(result["passed"])
+            self.assertTrue(result["native_seed"])
+
+    def test_native_seed_still_rejects_original_content_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            visual = root / "generated.png"
+            content = root / "source-content.png"
+            rendered = root / "rendered.png"
+            write_reference(visual, "#005587")
+            write_reference(content, "#333333")
+            write_reference(rendered, "#005587")
+            visual_metrics = {
+                "pixel_mean_distance": 10.0,
+                "structure_distance": 5.0,
+                "ink_projection_distance": 0.9,
+                "title_pixel_mean_distance": 90.0,
+                "title_structure_distance": 90.0,
+            }
+            content_metrics = dict(visual_metrics, pixel_mean_distance=40.0)
+
+            with patch("verify_page_visual._metrics", side_effect=[visual_metrics, content_metrics]):
+                result = verify_page_visual(
+                    visual,
+                    content_source_path=content,
+                    page_pptx=None,
+                    rendered_image=rendered,
+                    out_dir=root / "qa",
+                    accept=False,
+                    accept_visual=True,
+                    accept_content=True,
+                    native_seed=True,
+                )
 
             self.assertFalse(result["passed"])
             self.assertFalse(result["checks"]["original_content_reviewed"])

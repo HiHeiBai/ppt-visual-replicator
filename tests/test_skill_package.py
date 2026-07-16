@@ -44,6 +44,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("generation-plan.json", text)
         self.assertIn("scripts/stage_reconstruction_inputs.py", text)
         self.assertIn("scripts/validate_generation_delivery.py", text)
+        self.assertIn("scripts/seed_native_reconstruction.py", text)
         self.assertIn("generated.png", text)
         self.assertIn("Rebuild locally, one page at a time", text)
         self.assertNotIn('"$EDITPPT" image edit', text)
@@ -72,6 +73,8 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("original content image is the content authority", worker)
         self.assertIn("--accept-visual", worker)
         self.assertIn("--accept-content", worker)
+        self.assertIn("--native-seed", worker)
+        self.assertIn("at most two correction iterations", text)
 
     def test_skill_vendors_its_editable_ppt_runtime_and_worker_contract(self) -> None:
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
@@ -94,6 +97,7 @@ class SkillPackageTest(unittest.TestCase):
             "reconstruction/cli/editppt/runtime/main.py",
             "scripts/normalize_global_chrome.py",
             "scripts/render_final_qa.py",
+            "scripts/seed_native_reconstruction.py",
         ):
             self.assertTrue((SKILL / path).is_file(), path)
 

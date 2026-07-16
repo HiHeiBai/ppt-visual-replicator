@@ -130,6 +130,7 @@ def verify_page_visual(
     accept: bool,
     accept_visual: bool | None = None,
     accept_content: bool | None = None,
+    native_seed: bool = False,
 ) -> dict[str, Any]:
     source = Path(source_path).expanduser().resolve()
     content_source = (
@@ -194,12 +195,25 @@ def verify_page_visual(
             "title_pixel_mean_distance": 18.0,
             "title_structure_distance": 7.0,
         }
-        metric_passed = all(metrics[name] <= threshold for name, threshold in thresholds.items())
+        # A native seed intentionally keeps source-authoritative editable text
+        # and title typography. In that mode the generated redraw governs the
+        # coarse composition, while the original page governs exact text/ink.
+        visual_metric_names = (
+            ("pixel_mean_distance", "structure_distance")
+            if native_seed
+            else tuple(thresholds)
+        )
+        metric_passed = all(
+            metrics[name] <= thresholds[name] for name in visual_metric_names
+        )
+        content_metric_passed = all(
+            content_metrics[name] <= threshold for name, threshold in thresholds.items()
+        )
         visual_accept = bool(accept if accept_visual is None else accept_visual)
         content_accept = bool(accept if accept_content is None else accept_content)
         checks = {
             "visual_reference_match": bool(visual_accept and metric_passed),
-            "original_content_reviewed": content_accept,
+            "original_content_reviewed": bool(content_accept and content_metric_passed),
         }
         passed = all(checks.values())
         report = {
@@ -209,6 +223,7 @@ def verify_page_visual(
             "visual_accept": visual_accept,
             "content_accept": content_accept,
             "renderer": renderer,
+            "native_seed": native_seed,
             "source": str(source),
             "source_sha256": _sha256(source),
             "content_source": str(content_source),
@@ -257,6 +272,11 @@ def main() -> int:
     source_group.add_argument("--rendered-image", help="Test-only image input; normal reconstruction must use --page-pptx.")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument(
+        "--native-seed",
+        action="store_true",
+        help="Use coarse generated-visual metrics and source-authoritative exact text/title metrics.",
+    )
+    parser.add_argument(
         "--accept",
         action="store_true",
         help="Legacy shorthand that accepts both comparisons after inspection.",
@@ -282,6 +302,7 @@ def main() -> int:
             accept=args.accept,
             accept_visual=(args.accept or args.accept_visual),
             accept_content=(args.accept or args.accept_content),
+            native_seed=args.native_seed,
         )
     except VisualGateError as exc:
         raise SystemExit(str(exc)) from exc

@@ -145,6 +145,12 @@ python3 scripts/stage_reconstruction_inputs.py --run-dir "$RUN"
   --job-dir "$RUN/reconstruction" \
   --output-name origin_edited.pptx \
   --max-concurrent-pages 1
+
+# For editable PPTX sources, seed native text, shapes, coordinates, and images.
+# This is the default fast path and makes no additional image-model call.
+python3 scripts/seed_native_reconstruction.py \
+  --run-dir "$RUN" \
+  --reconstruction-dir "$RUN/reconstruction"
 ```
 
 Rebuild locally, one page at a time. The default workflow does not require subagents.
@@ -153,7 +159,7 @@ Rebuild locally, one page at a time. The default workflow does not require subag
 "$EDITPPT" run next "$RUN/reconstruction" --local --json
 ```
 
-This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. Follow that local page prompt to create the manifest, restore editable text from the original source/ledger, build the page, and make its contact sheet. For a generated page, the accepted `generated.png` is the visual authority; the original `source-content.png` and source ledger remain the content authority.
+This command creates the selected page’s `worker-prompt.md` and prints the exact `prompt_file` and dispatch command. When `native-manifest-seed.json` exists, build it immediately and refine only the differences visible against the accepted `generated.png`; do not rebuild the page from pixels and do not call `editppt image edit`. The original `source-content.png` and source ledger remain the content authority.
 
 Before `editppt page validate` or `run record`, render the rebuilt one-page PPTX with macOS Quick Look and run the required dual-reference visual gate. Compare the render to the accepted `generated.png` for palette, composition, chrome, cards, spacing, and decoration; compare it separately to the original `source-content.png` for content responsibilities, text regions, data visuals, citations, and page identity. Inspect both side-by-side and difference pairs, then accept only a passing `visual-gate.json`. The gate binds both reference hashes and the current page PPTX hash; either missing comparison is a hard failure.
 
@@ -170,6 +176,8 @@ Claim and record the page with the same `agent-id`:
 ```
 
 Repeat `run next --local` → local rebuild → dual-reference Quick Look gate → `run record` for each remaining page. Do not dispatch a page before its prompt exists, and do not mark a failed visual or structural validation as recorded.
+
+Fail fast: require a first `preview.png` before manual refinement, allow at most two correction iterations, and return a concrete failed `validation.json` instead of leaving a page indefinitely in `dispatched`. A stalled page is a failed run, not a reason to wait for hours.
 
 ### 4. Finalize and prove editability
 

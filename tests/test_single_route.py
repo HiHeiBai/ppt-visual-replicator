@@ -247,6 +247,8 @@ class SingleRouteTest(unittest.TestCase):
             self.assertIn(manifest["pages"][0]["source_image"], prompt)
             self.assertIn("generated redraw is the visual authority", prompt)
             self.assertIn("--content-source", prompt)
+            self.assertIn("native-manifest-seed.json", prompt)
+            self.assertIn("native-source-slide.pptx", prompt)
             self.assertIn("Do not use `editppt image generate`", prompt)
             self.assertIn("source-faithful-region", prompt)
 

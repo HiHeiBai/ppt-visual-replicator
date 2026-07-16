@@ -79,6 +79,8 @@ def page_worker_template() -> str:
 def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
     context = {
         "original_source_image": str(page_dir_for(run_dir, page) / "source.png"),
+        "native_manifest_seed": "none",
+        "native_source_slide": "none",
         "shared_assets_index": "none",
         "title_style_sheet": "none",
         "style_contract": "none",
@@ -110,6 +112,8 @@ def direct_workflow_context(run_dir: Path, page: dict) -> dict[str, str]:
                 else "none"
             ),
             "page_family": str(direct_page.get("family_hint") or "content"),
+            "native_manifest_seed": str((page_dir_for(run_dir, page) / "native-manifest-seed.json").resolve()),
+            "native_source_slide": str((page_dir_for(run_dir, page) / "native-source-slide.pptx").resolve()),
         }
     )
     return context
@@ -126,6 +130,8 @@ def build_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
         "{{PAGE_DIR}}": str(page_dir),
         "{{SOURCE_IMAGE}}": str(source_image),
         "{{ORIGINAL_SOURCE_IMAGE}}": workflow["original_source_image"],
+        "{{NATIVE_MANIFEST_SEED}}": workflow["native_manifest_seed"],
+        "{{NATIVE_SOURCE_SLIDE}}": workflow["native_source_slide"],
         "{{SHARED_ASSETS_INDEX}}": workflow["shared_assets_index"],
         "{{TITLE_STYLE_SHEET}}": workflow["title_style_sheet"],
         "{{STYLE_CONTRACT}}": workflow["style_contract"],

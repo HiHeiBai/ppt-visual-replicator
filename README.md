@@ -12,11 +12,14 @@ An agent skill that redraws PowerPoint slides in a coherent visual style and reb
 - Rebuilds titles, body text, cards, tables, arrows, and structural elements as editable PowerPoint objects.
 - Preserves screenshots, photos, charts, and complex illustrations as positioned image regions when appropriate.
 - Reuses deck-level assets and supports resumable runs.
+- Seeds text, shapes, coordinates, and pictures directly from an editable source PPTX, avoiding a second image-model call during reconstruction.
 - Bundles the `editppt` reconstruction runtime.
 
 ## Fixed workflow
 
 Every page follows the same pipeline: render the original page, redraw it with built-in imagegen, review `generated.png`, and reconstruct it as editable PowerPoint objects. There are no speed profiles or page-family routes.
+
+Reconstruction builds the native seed immediately, allows at most two preview-correction iterations, and records a concrete failure instead of leaving a page running indefinitely. Final QA uses macOS Quick Look when available, with LibreOffice as the fallback.
 
 ## Install
 
@@ -78,7 +81,8 @@ Optional inputs include:
 
 ```text
 PPTX -> rendered source PNGs -> generation plan
-     -> built-in imagegen redraw for every page -> editable reconstruction
+     -> built-in imagegen redraw for every page -> native editable seed
+     -> bounded editable reconstruction
      -> validation -> final real-render QA -> editable PPTX
 ```
 

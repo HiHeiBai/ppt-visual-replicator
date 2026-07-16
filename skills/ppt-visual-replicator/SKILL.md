@@ -28,7 +28,7 @@ Optional:
 - A short style brief.
 - Strict text protection for medical, financial, legal, scientific, or number-dense slides.
 
-Do not ask for a speed profile, a style-contract JSON, shared assets, duplicate-page handling, or worker count unless the user explicitly asks for one. They are implementation details, not normal inputs.
+Do not ask for a style-contract JSON, shared assets, or worker count unless the user explicitly asks for one. They are implementation details, not normal inputs.
 
 ## Content rules
 
@@ -66,7 +66,6 @@ python3 scripts/prepare_direct_deck.py \
   --target "target.pptx" \
   --target-slide 34 \
   --run-dir "output/slide-034" \
-  --full-page-imagegen \
   --source-renderer quicklook
 ```
 
@@ -76,7 +75,6 @@ Full deck:
 python3 scripts/prepare_direct_deck.py \
   --target "target.pptx" \
   --run-dir "output/deck" \
-  --full-page-imagegen \
   --source-renderer quicklook
 ```
 
@@ -97,11 +95,13 @@ The command writes these per-page inputs:
 - `generated.png` — the required destination for the selected imagegen result
 - `title-styles.json` — source title font, color, size, weight, and placement authority for native reconstruction
 
+The deck run also writes a static `generation-plan.json`; every target page has action `generate`.
+
 Inspect the source PNG before generating. Stop if it is clipped, has missing glyphs, or does not match the requested slide.
 
 ### 2. Redraw with built-in imagegen
 
-For every page whose `generation-plan.json` action is `generate`:
+For every prepared page:
 
 1. Call the built-in `image_gen` tool. The page's `source-content.png` is the first content/layout input; append only user-supplied reference-style PNGs.
 2. Use the page's `direct-image-prompt.txt` as the prompt.
@@ -131,8 +131,6 @@ python3 scripts/validate_generation_delivery.py --run-dir "$RUN"
 ```
 
 Do not continue to reconstruction while this gate reports an unreviewed page, changed PNG, changed source image, or missing review check.
-
-For an exact duplicate source page, reuse the canonical generated PNG only when `generation-plan.json` marks it `reuse`; do not make an extra image call.
 
 ### 3. Rebuild locally as editable PPTX
 

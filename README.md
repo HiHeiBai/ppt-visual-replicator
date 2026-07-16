@@ -11,16 +11,12 @@ An agent skill that redraws PowerPoint slides in a coherent visual style and reb
 - Uses visual OCR by default, with strict native-text protection for number-sensitive decks.
 - Rebuilds titles, body text, cards, tables, arrows, and structural elements as editable PowerPoint objects.
 - Preserves screenshots, photos, charts, and complex illustrations as positioned image regions when appropriate.
-- Detects exact duplicate slides, reuses deck-level assets, and supports resumable runs.
+- Reuses deck-level assets and supports resumable runs.
 - Bundles the `editppt` reconstruction runtime.
 
-## Speed profiles
+## Fixed workflow
 
-| Profile | Behavior | Best for |
-| --- | --- | --- |
-| `balanced` | Redraws covers and visual concept pages; directly rebuilds screenshot-led pages | Default, recommended |
-| `fast` | Minimizes whole-slide generation and preserves more complex regions as images | Tutorial and screenshot-heavy decks |
-| `strict` | Redraws every unique page and applies full per-page asset separation | Maximum object-level editability |
+Every page follows the same pipeline: render the original page, redraw it with built-in imagegen, review `generated.png`, and reconstruct it as editable PowerPoint objects. There are no speed profiles or page-family routes.
 
 ## Install
 
@@ -68,12 +64,11 @@ The bundled editable-PPT runtime is installed automatically when first needed.
 In Codex, attach or point to a PowerPoint file and ask:
 
 ```text
-Use $ppt-visual-replicator in balanced mode to redraw this PPTX and return an editable PPTX.
+Use $ppt-visual-replicator to redraw this PPTX and return an editable PPTX.
 ```
 
 Optional inputs include:
 
-- `fast`, `balanced`, or `strict` speed profile
 - A target slide number for a one-page run
 - A style brief
 - One or a few deck-level reference-style PNGs
@@ -83,11 +78,11 @@ Optional inputs include:
 
 ```text
 PPTX -> rendered source PNGs -> generation plan
-     -> selective visual redraw -> editable reconstruction
+     -> built-in imagegen redraw for every page -> editable reconstruction
      -> validation -> final real-render QA -> editable PPTX
 ```
 
-Exact duplicate rendered pages are processed once. Repeated logos, mascots, decorative elements, and recurring chrome can be stored in a shared deck asset index and reused across pages.
+Repeated logos, mascots, decorative elements, and recurring chrome can be stored in a shared deck asset index and reused during editable reconstruction.
 
 ## Development
 

@@ -1,6 +1,6 @@
 # Optional Global Chrome Normalization
 
-Use this only when the user explicitly asks to unify recurring deck elements after editable reconstruction. It is a post-pass over page manifests, not a generation route and not a calibration pipeline.
+Use this only when the user explicitly asks to unify recurring deck elements after editable reconstruction. It is a post-pass over page manifests and does not affect page generation.
 
 Create a small JSON config. All geometry and font sizes use a 1920×1080 baseline and are scaled to each page source width.
 

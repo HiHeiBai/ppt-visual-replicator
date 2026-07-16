@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract a self-contained visual region for fast or balanced reconstruction."""
+"""Extract a self-contained visual region for editable reconstruction."""
 
 from __future__ import annotations
 
@@ -42,12 +42,12 @@ def extract_region(
         output.parent.mkdir(parents=True, exist_ok=True)
         region.save(output, format="PNG")
     return {
-        "schema": "ppt_visual_profile_region.v1",
+        "schema": "ppt_visual_source_region.v1",
         "source": str(source),
         "output": str(output),
         "box_px": [x, y, width, height],
         "source_size_px": [source_width, source_height],
-        "source_type": "profile-rasterized-region",
+        "source_type": "source-faithful-region",
     }
 
 

@@ -65,7 +65,7 @@ def _load_normalized(path: Path, size: tuple[int, int]) -> Image.Image:
 def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     source_small = source.resize((128, 72), Image.Resampling.LANCZOS)
     rendered_small = rendered.resize((128, 72), Image.Resampling.LANCZOS)
-    pixel_values = zip(source_small.get_flattened_data(), rendered_small.get_flattened_data())
+    pixel_values = zip(source_small.getdata(), rendered_small.getdata())
     pixel_distance = sum(
         abs(left_channel - right_channel)
         for left, right in pixel_values
@@ -76,13 +76,13 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     rendered_structure = rendered.convert("L").resize((64, 36), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(1))
     structure_distance = sum(
         abs(left - right)
-        for left, right in zip(source_structure.get_flattened_data(), rendered_structure.get_flattened_data())
+        for left, right in zip(source_structure.getdata(), rendered_structure.getdata())
     ) / (64 * 36)
 
     source_ink = source.convert("L").resize((320, 180), Image.Resampling.LANCZOS)
     rendered_ink = rendered.convert("L").resize((320, 180), Image.Resampling.LANCZOS)
     def projection(image: Image.Image) -> tuple[list[int], list[int], int]:
-        values = list(image.get_flattened_data())
+        values = list(image.getdata())
         ink = [value < 200 for value in values]
         rows = [sum(ink[top * 320 : (top + 1) * 320]) for top in range(180)]
         columns = [sum(ink[left + top * 320] for top in range(180)) for left in range(320)]
@@ -97,8 +97,8 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     title_source = source.crop((0, 0, source.width, int(source.height * 0.32)))
     title_rendered = rendered.crop((0, 0, rendered.width, int(rendered.height * 0.32)))
     title_pixels = zip(
-        title_source.resize((160, 51), Image.Resampling.LANCZOS).get_flattened_data(),
-        title_rendered.resize((160, 51), Image.Resampling.LANCZOS).get_flattened_data(),
+        title_source.resize((160, 51), Image.Resampling.LANCZOS).getdata(),
+        title_rendered.resize((160, 51), Image.Resampling.LANCZOS).getdata(),
     )
     title_pixel_distance = sum(
         abs(left_channel - right_channel)
@@ -109,7 +109,7 @@ def _metrics(source: Image.Image, rendered: Image.Image) -> dict[str, float]:
     title_rendered_structure = title_rendered.convert("L").resize((80, 26), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(1))
     title_structure_distance = sum(
         abs(left - right)
-        for left, right in zip(title_source_structure.get_flattened_data(), title_rendered_structure.get_flattened_data())
+        for left, right in zip(title_source_structure.getdata(), title_rendered_structure.getdata())
     ) / (80 * 26)
     return {
         "pixel_mean_distance": round(pixel_distance, 3),

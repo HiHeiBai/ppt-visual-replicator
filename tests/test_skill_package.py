@@ -16,7 +16,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("Required:", text)
         self.assertIn("Target PPTX", text)
         self.assertIn("user-supplied reference PNGs", text)
-        self.assertIn("Do not ask for a speed profile", text)
+        self.assertNotIn("speed profile", text.lower())
         self.assertIn("imagegen", text)
         self.assertIn('"$EDITPPT" prepare', text)
         self.assertIn('"$EDITPPT" run finalize', text)
@@ -26,7 +26,6 @@ class SkillPackageTest(unittest.TestCase):
             "references/content-protection.md",
             "references/acceptance.md",
             "references/chrome-normalization.md",
-            "references/speed-profiles.md",
         ):
             self.assertTrue((SKILL / reference).is_file(), reference)
 
@@ -40,7 +39,8 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("--style-brief", text)
         self.assertIn("--strict-text-protection", text)
         self.assertIn("--source-renderer quicklook", text)
-        self.assertIn("--full-page-imagegen", text)
+        self.assertNotIn("--full-page-imagegen", text)
+        self.assertIn("For every prepared page", text)
         self.assertIn("generation-plan.json", text)
         self.assertIn("scripts/stage_reconstruction_inputs.py", text)
         self.assertIn("scripts/validate_generation_delivery.py", text)

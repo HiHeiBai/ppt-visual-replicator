@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import json
 import importlib.util
 import struct
@@ -97,7 +98,7 @@ def record_accepted_generation_review(run_dir: Path, page: dict) -> None:
     path.write_text(json.dumps(review), encoding="utf-8")
 
 
-class SpeedProfileTest(unittest.TestCase):
+class SingleRouteTest(unittest.TestCase):
     def make_target(self, root: Path) -> Path:
         return write_fixture_pptx(
             root / "target.pptx",
@@ -109,7 +110,7 @@ class SpeedProfileTest(unittest.TestCase):
             ],
         )
 
-    def test_balanced_routes_visual_pages_and_reuses_exact_duplicates(self) -> None:
+    def test_every_page_requires_its_own_generated_png(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manifest = prepare_direct_deck(
@@ -119,29 +120,31 @@ class SpeedProfileTest(unittest.TestCase):
                 renderer=fake_renderer,
             )
 
-            self.assertEqual(manifest["speed_profile"], "balanced")
-            self.assertEqual(manifest["generation_summary"]["generate"], 2)
-            self.assertEqual(manifest["generation_summary"]["direct-rebuild"], 1)
-            self.assertEqual(manifest["generation_summary"]["reuse"], 1)
-            self.assertEqual(manifest["pages"][3]["generation"]["action"], "reuse")
-            self.assertEqual(manifest["pages"][3]["generation"]["canonical_slide"], 2)
+            self.assertNotIn("speed_profile", manifest)
+            self.assertEqual(manifest["generation_summary"]["generate"], 4)
+            self.assertNotIn("direct-rebuild", manifest["generation_summary"])
+            self.assertNotIn("reuse", manifest["generation_summary"])
+            self.assertTrue(
+                all(page["generation"]["action"] == "generate" for page in manifest["pages"])
+            )
+            self.assertTrue(
+                all("canonical_slide" not in page["generation"] for page in manifest["pages"])
+            )
             self.assertTrue((root / "run" / "generation-plan.json").is_file())
             self.assertTrue((root / "run" / "shared-assets" / "index.json").is_file())
 
-    def test_strict_redraws_every_unique_page(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            manifest = prepare_direct_deck(
-                self.make_target(root),
-                root / "run",
-                speed_profile="strict",
-                force_reconstruct=True,
-                renderer=fake_renderer,
-            )
-
-            self.assertEqual(manifest["generation_summary"]["generate"], 3)
-            self.assertEqual(manifest["generation_summary"]["reuse"], 1)
-            self.assertEqual(manifest["generation_summary"]["direct-rebuild"], 0)
+    def test_prepare_api_and_cli_expose_no_route_controls(self) -> None:
+        parameters = inspect.signature(prepare_direct_deck).parameters
+        self.assertNotIn("speed_profile", parameters)
+        self.assertNotIn("full_page_imagegen", parameters)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / "prepare_direct_deck.py"), "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotIn("--speed-profile", result.stdout)
+        self.assertNotIn("--full-page-imagegen", result.stdout)
 
     def test_resume_requires_the_same_contract_and_reuses_ready_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -169,13 +172,13 @@ class SpeedProfileTest(unittest.TestCase):
                 prepare_direct_deck(
                     target,
                     root / "run",
-                    speed_profile="strict",
+                    strict_text_protection=True,
                     force_reconstruct=True,
                     renderer=fake_renderer,
                     resume=True,
                 )
 
-    def test_stages_generated_direct_and_reused_inputs_in_slide_order(self) -> None:
+    def test_stages_every_generated_input_in_slide_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manifest = prepare_direct_deck(
@@ -185,46 +188,39 @@ class SpeedProfileTest(unittest.TestCase):
                 renderer=fake_renderer,
             )
             for page in manifest["pages"]:
-                if page["generation"]["action"] == "generate":
-                    (root / "run" / page["generated_image"]).write_bytes(
-                        f"generated-{page['target_slide']}".encode()
-                    )
-                    record_accepted_generation_review(root / "run", page)
+                (root / "run" / page["generated_image"]).write_bytes(
+                    f"generated-{page['target_slide']}".encode()
+                )
+                record_accepted_generation_review(root / "run", page)
 
             report = stage_reconstruction_inputs(root / "run")
             self.assertEqual(report["page_count"], 4)
-            self.assertEqual(report["pages"][0]["source_kind"], "generated")
-            self.assertEqual(report["pages"][1]["source_kind"], "source-content")
-            self.assertEqual(report["pages"][3]["source_kind"], "reused-source-content")
-            self.assertEqual(
+            self.assertTrue(all(page["source_kind"] == "generated" for page in report["pages"]))
+            self.assertNotEqual(
                 (root / "run" / "reconstruction-inputs" / "slide-002.png").read_bytes(),
                 (root / "run" / "reconstruction-inputs" / "slide-004.png").read_bytes(),
             )
 
-    def test_profile_region_is_allowed_only_in_fast_or_balanced(self) -> None:
+    def test_source_faithful_region_is_allowed_without_a_profile(self) -> None:
         item = {
             "id": "tutorial_screenshot",
-            "description": "Self-contained software screenshot preserved as a profile region",
+            "description": "Self-contained software screenshot preserved as a source-faithful region",
             "path": "assets/tutorial.png",
         }
         provenance = {
             "path": "assets/tutorial.png",
             "source": "source.png",
-            "source_type": "profile-rasterized-region",
+            "source_type": "source-faithful-region",
             "provenance_note": "Preserved as one self-contained software screenshot region.",
             "region_reason": "Internal UI controls do not need object-level editing.",
         }
-        balanced = {
-            "speed_profile": "balanced",
+        manifest = {
             "visual_inventory": [item],
             "asset_provenance": [provenance],
         }
-        strict = {**balanced, "speed_profile": "strict"}
+        self.assertEqual(foreground_asset_contract_violations(manifest), [])
 
-        self.assertEqual(foreground_asset_contract_violations(balanced), [])
-        self.assertTrue(foreground_asset_contract_violations(strict))
-
-    def test_page_worker_prompt_receives_speed_route_and_original_source(self) -> None:
+    def test_page_worker_prompt_receives_fixed_pipeline_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manifest = prepare_direct_deck(
@@ -244,13 +240,15 @@ class SpeedProfileTest(unittest.TestCase):
 
             prompt = build_prompt(reconstruction, page, page_dir)
 
-            self.assertIn("Speed profile: balanced", prompt)
+            self.assertNotIn("Speed profile:", prompt)
+            self.assertNotIn("Page route:", prompt)
+            self.assertNotIn("Canonical duplicate", prompt)
             self.assertIn("shared-assets/index.json", prompt)
             self.assertIn(manifest["pages"][0]["source_image"], prompt)
             self.assertIn("generated redraw is the visual authority", prompt)
             self.assertIn("--content-source", prompt)
             self.assertIn("Do not use `editppt image generate`", prompt)
-            self.assertNotIn("{{SPEED_PROFILE}}", prompt)
+            self.assertIn("source-faithful-region", prompt)
 
     def test_region_extractor_rejects_full_slide_and_writes_partial_png(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -259,7 +257,7 @@ class SpeedProfileTest(unittest.TestCase):
             Image.new("RGB", (200, 100), "navy").save(source)
             script = SKILL / "reconstruction" / "scripts" / "extract-page-region.py"
             output = root / "assets" / "region.png"
-            subprocess.run(
+            extracted = subprocess.run(
                 [
                     sys.executable,
                     str(script),
@@ -274,6 +272,7 @@ class SpeedProfileTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            self.assertEqual(json.loads(extracted.stdout)["source_type"], "source-faithful-region")
             with Image.open(output) as image:
                 self.assertEqual(image.size, (100, 50))
 

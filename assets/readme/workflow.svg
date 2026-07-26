@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">PPT Visual Replicator workflow</title>
+  <desc id="desc">A five-step workflow from a source PowerPoint, through rendering and image generation, to editable reconstruction and final verification.</desc>
+  <rect width="1200" height="300" rx="24" fill="#171120"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <text x="54" y="65" font-size="20" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" letter-spacing="2" fill="#d2b6ff">ONE CONTROLLED ROUTE</text>
+    <text x="54" y="106" font-size="34" font-weight="720" fill="#fbf7ff">Every slide moves through the same bounded pipeline.</text>
+  </g>
+  <g transform="translate(54 154)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <g>
+      <rect width="182" height="92" rx="14" fill="#251b35" stroke="#5e4b78" stroke-width="2"/>
+      <text x="22" y="35" font-size="18" fill="#f4c85a">01 / INPUT</text><text x="22" y="66" font-size="23" font-weight="700" fill="#fbf7ff">Source PPTX</text>
+    </g>
+    <path d="M196 46H222" stroke="#9c8cae" stroke-width="3"/><path d="M212 36L222 46 212 56" fill="none" stroke="#9c8cae" stroke-width="3"/>
+    <g transform="translate(236)">
+      <rect width="182" height="92" rx="14" fill="#251b35" stroke="#5e4b78" stroke-width="2"/>
+      <text x="22" y="35" font-size="18" fill="#d2b6ff">02 / RENDER</text><text x="22" y="66" font-size="23" font-weight="700" fill="#fbf7ff">Slide PNG</text>
+    </g>
+    <path d="M432 46H458" stroke="#9c8cae" stroke-width="3"/><path d="M448 36L458 46 448 56" fill="none" stroke="#9c8cae" stroke-width="3"/>
+    <g transform="translate(472)">
+      <rect width="182" height="92" rx="14" fill="#251b35" stroke="#5e4b78" stroke-width="2"/>
+      <text x="22" y="35" font-size="18" fill="#f4c85a">03 / REDRAW</text><text x="22" y="66" font-size="23" font-weight="700" fill="#fbf7ff">Visual pass</text>
+    </g>
+    <path d="M668 46H694" stroke="#9c8cae" stroke-width="3"/><path d="M684 36L694 46 684 56" fill="none" stroke="#9c8cae" stroke-width="3"/>
+    <g transform="translate(708)">
+      <rect width="182" height="92" rx="14" fill="#251b35" stroke="#5e4b78" stroke-width="2"/>
+      <text x="22" y="35" font-size="18" fill="#d2b6ff">04 / BUILD</text><text x="22" y="66" font-size="23" font-weight="700" fill="#fbf7ff">Native objects</text>
+    </g>
+    <path d="M904 46H930" stroke="#9c8cae" stroke-width="3"/><path d="M920 36L930 46 920 56" fill="none" stroke="#9c8cae" stroke-width="3"/>
+    <g transform="translate(944)">
+      <rect width="148" height="92" rx="14" fill="#30203c" stroke="#f4c85a" stroke-width="2"/>
+      <text x="20" y="35" font-size="18" fill="#f4c85a">05 / QA</text><text x="20" y="66" font-size="23" font-weight="700" fill="#fbf7ff">Verify</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="410" viewBox="0 0 1200 410" role="img" aria-labelledby="title desc">
+  <title id="title">What becomes editable in the reconstructed PowerPoint</title>
+  <desc id="desc">The PowerPoint Visual Replicator rebuilds titles, body text, cards, tables, arrows, and structural elements as native PowerPoint objects, while preserving screenshots, photos, charts, and complex illustrations as positioned image regions when appropriate.</desc>
+  <rect width="1200" height="410" rx="28" fill="#171120"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <text x="58" y="70" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" letter-spacing="2" fill="#d2b6ff">EDITABILITY, BY ELEMENT</text>
+    <text x="58" y="116" font-size="38" font-weight="760" fill="#fbf7ff">Rebuild what should stay editable. Keep complex imagery in place.</text>
+    <text x="58" y="151" font-size="21" fill="#c5bbcF">The output is not a flattened screenshot pretending to be a deck.</text>
+  </g>
+  <g transform="translate(58 198)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <g>
+      <rect width="510" height="154" rx="18" fill="#241a34" stroke="#c8a7ff" stroke-width="2"/>
+      <text x="30" y="38" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#d2b6ff">NATIVE POWERPOINT OBJECTS</text>
+      <g transform="translate(30 64)" fill="#fbf7ff">
+        <rect width="118" height="60" rx="10" fill="#c8a7ff"/><text x="59" y="37" text-anchor="middle" font-size="18" font-weight="700" fill="#251a35">TEXT</text>
+        <rect x="132" width="118" height="60" rx="10" fill="#f4c85a"/><text x="191" y="37" text-anchor="middle" font-size="18" font-weight="700" fill="#251a35">SHAPES</text>
+        <rect x="264" width="118" height="60" rx="10" fill="#94d8c2"/><text x="323" y="37" text-anchor="middle" font-size="18" font-weight="700" fill="#18302b">TABLES</text>
+        <rect x="396" width="84" height="60" rx="10" fill="#efdee8"/><text x="438" y="37" text-anchor="middle" font-size="18" font-weight="700" fill="#3f283a">FLOW</text>
+      </g>
+    </g>
+    <path d="M542 76H602" stroke="#927fa8" stroke-width="3" stroke-linecap="round"/>
+    <path d="M590 64L602 76 590 88" fill="none" stroke="#927fa8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(630)">
+      <rect width="512" height="154" rx="18" fill="#21192c" stroke="#5e4b78" stroke-width="2"/>
+      <text x="30" y="38" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#c2b6d0">POSITIONED IMAGE REGIONS, WHEN APPROPRIATE</text>
+      <g transform="translate(30 64)">
+        <rect width="184" height="60" rx="10" fill="#3a2c4d"/><path d="M18 44L53 16 83 43 103 27 158 44Z" fill="#94d8c2"/><circle cx="142" cy="19" r="8" fill="#f4c85a"/><text x="0" y="92" font-size="18" fill="#fbf7ff">screenshots &amp; photos</text>
+        <rect x="252" width="184" height="60" rx="10" fill="#3a2c4d"/><path d="M274 46V20M298 46V12M322 46V28M346 46V17M370 46V8" stroke="#f4c85a" stroke-width="8" stroke-linecap="round"/><text x="252" y="92" font-size="18" fill="#fbf7ff">charts &amp; illustration</text>
+      </g>
+    </g>
+  </g>
+  <text x="58" y="386" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#f4c85a">THE DECISION IS EXPLICIT: EDITABLE WHERE IT HELPS, POSITIONED IMAGE WHERE IT PROTECTS FIDELITY.</text>
+</svg>

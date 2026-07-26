@@ -42,14 +42,14 @@ Reconstruction builds the native seed immediately, allows at most two preview-co
 Install globally with the Skills CLI:
 
 ```bash
-npx skills add Moxi-Lab/ppt-visual-replicator \
+npx skills add HiHeiBai/ppt-visual-replicator \
   --skill ppt-visual-replicator --global --yes
 ```
 
 Or clone and copy the skill manually:
 
 ```bash
-git clone https://github.com/Moxi-Lab/ppt-visual-replicator.git
+git clone https://github.com/HiHeiBai/ppt-visual-replicator.git
 mkdir -p ~/.codex/skills
 cp -R ppt-visual-replicator/skills/ppt-visual-replicator ~/.codex/skills/
 ```

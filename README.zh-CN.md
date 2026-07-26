@@ -26,14 +26,14 @@
 使用 Skills CLI 全局安装：
 
 ```bash
-npx skills add Moxi-Lab/ppt-visual-replicator \
+npx skills add HiHeiBai/ppt-visual-replicator \
   --skill ppt-visual-replicator --global --yes
 ```
 
 也可以手动安装：
 
 ```bash
-git clone https://github.com/Moxi-Lab/ppt-visual-replicator.git
+git clone https://github.com/HiHeiBai/ppt-visual-replicator.git
 mkdir -p ~/.codex/skills
 cp -R ppt-visual-replicator/skills/ppt-visual-replicator ~/.codex/skills/
 ```

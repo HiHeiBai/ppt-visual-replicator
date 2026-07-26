@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="390" viewBox="0 0 1200 390" role="img" aria-labelledby="title desc">
+  <title id="title">PPT Visual Replicator</title>
+  <desc id="desc">A workflow that turns a source PowerPoint slide into a visually coherent and editable PowerPoint deck.</desc>
+  <rect width="1200" height="390" rx="28" fill="#120d1b"/>
+  <path d="M60 66H1140M60 330H1140" stroke="#3a304a" stroke-width="2"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" fill="#fbf7ff">
+    <text x="62" y="105" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" letter-spacing="2.4" fill="#d2b6ff">EDITABLE PRESENTATION RECONSTRUCTION</text>
+    <text x="60" y="166" font-size="56" font-weight="760">PPT Visual</text>
+    <text x="60" y="224" font-size="56" font-weight="760">Replicator</text>
+    <text x="62" y="268" font-size="23" fill="#d5ccdf">Redraw any deck in a coherent visual style, then rebuild it</text>
+    <text x="62" y="298" font-size="23" fill="#d5ccdf">as editable PowerPoint objects — without rewriting its content.</text>
+  </g>
+  <g transform="translate(700 88)">
+    <g transform="rotate(-5 90 96)">
+      <rect x="0" y="0" width="185" height="132" rx="12" fill="#f5f0e8"/>
+      <rect x="18" y="20" width="94" height="10" rx="5" fill="#403755"/>
+      <rect x="18" y="43" width="138" height="6" rx="3" fill="#a39aaa"/>
+      <rect x="18" y="62" width="70" height="48" rx="7" fill="#c7bbd8"/>
+      <rect x="99" y="62" width="57" height="48" rx="7" fill="#e1d4a3"/>
+    </g>
+    <path d="M203 96H283" stroke="#f4c85a" stroke-width="4" stroke-linecap="round"/>
+    <path d="M271 84L283 96 271 108" fill="none" stroke="#f4c85a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(300 -11)">
+      <rect x="0" y="0" width="198" height="152" rx="14" fill="#2a2040" stroke="#d0b0ff" stroke-width="2"/>
+      <rect x="20" y="23" width="115" height="11" rx="5.5" fill="#fbf7ff"/>
+      <rect x="20" y="47" width="151" height="7" rx="3.5" fill="#aa9fbd"/>
+      <rect x="20" y="70" width="72" height="56" rx="8" fill="#d0b0ff"/>
+      <rect x="105" y="70" width="66" height="56" rx="8" fill="#f4c85a"/>
+      <circle cx="36" cy="86" r="7" fill="#2a2040" stroke="#fbf7ff" stroke-width="2"/>
+      <path d="M126 83H153M126 96H148M126 109H157" stroke="#2a2040" stroke-width="4" stroke-linecap="round"/>
+    </g>
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" text-anchor="middle">
+      <text x="90" y="174" fill="#b9afc6">SOURCE .PPTX</text>
+      <text x="399" y="174" fill="#d9c5ff">EDITABLE .PPTX</text>
+    </g>
+    <rect x="0" y="208" width="500" height="57" rx="14" fill="#20172f" stroke="#3a304a" stroke-width="2"/>
+    <text x="250" y="244" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="19" fill="#f4c85a">RENDER → REDRAW → RECONSTRUCT → VERIFY</text>
+  </g>
+</svg>
